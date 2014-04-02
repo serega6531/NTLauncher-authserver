@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -8,10 +9,6 @@
 #include <unistd.h>
 #include <signal.h>
 
-#define bool	_Bool
-#define true	1
-#define false	0
-
 #define BUFSIZE 8192
 
     /* SETTINGS */
@@ -19,10 +16,48 @@
 #define MAXTHREADS 15
 #define CLIENT_VERSION 1
 #define CLIENT_MD5 "098f6bcd4621d373cade4e832627b4f6"
-#define LAUNCH_STRING "java -Xms1G -Xmx1G -jar /home/serega6531/mcserver/lobby/craftbukkit.jar"
+#define LAUNCH_STRING "cd server && java -Xms512M -Xmx512M -jar craftbukkit.jar"
 
-FILE * usersfile, *serverpipe;
-int lsock = 0;
+FILE * usersfile;
+int lsock = 0, serverpipe[2];
+
+#define READ 0
+#define WRITE 1
+
+pid_t popen2(const char *command, int *infp, int *outfp){
+	int p_stdin[2], p_stdout[2];
+	pid_t pid;
+
+	if (pipe(p_stdin) != 0 || pipe(p_stdout) != 0)
+		return -1;
+
+	pid = fork();
+
+	if (pid < 0)
+		return pid;
+	else if (pid == 0){
+		close(p_stdin[WRITE]);
+		dup2(p_stdin[READ], READ);
+		close(p_stdout[READ]);
+		dup2(p_stdout[WRITE], WRITE);
+
+		execl("/bin/sh", "sh", "-c", command, NULL);
+		perror("execl");
+		exit(1);
+	}
+
+	if (infp == NULL)
+		close(p_stdin[WRITE]);
+	else
+		*infp = p_stdin[WRITE];
+
+	if (outfp == NULL)
+		close(p_stdout[READ]);
+	else
+		*outfp = p_stdout[READ];
+
+	return pid;
+}
 
 void strcut(char *str, int begin, int len)
 {
@@ -80,7 +115,8 @@ void getXMLData(char *string, char *key, char *result){
 void stop(){
 	puts("Stopping server...");
 	fclose(usersfile);
-	pclose(serverpipe);
+	close(serverpipe[0]);
+	close(serverpipe[1]);
 	close(lsock);
 	exit(0);
 }
@@ -102,12 +138,22 @@ bool haveLoginAndPassword(char *login, char *password){
 	return false;
 }
 
-void addPlayer(char *player){
+void sendMessage(char *message){
+	write(serverpipe[WRITE], message, sizeof(message));
+}
 
+void addPlayer(char *player){
+	char message[strlen(player) + 16];
+
+	sprintf(message, "whitelist add %s\n", player);
+	sendMessage(message);
 }
 
 void removePlayer(char *player){
+	char message[strlen(player) + 19];
 
+	sprintf(message, "whitelist remove %s\n", player);
+	sendMessage(message);
 }
 
 void processAnswer(char *result, char *message){
@@ -168,17 +214,37 @@ void * f00(void *data)
         return NULL;
 }
 
+void *f01(void *data){
+	char buf[BUFSIZE];
+
+	while (1){
+		read(serverpipe[READ], buf, BUFSIZE - 1);
+		printf("[SERVER]%s\n", buf);
+	}
+	return NULL;
+}
+
+void *f02(void *data){
+
+	return NULL;
+}
+
 int main(int argc, char **argv)
 {
 	int on = 1, asock = 0;
 	struct  sockaddr_in sa;
-	pthread_t threadid[MAXTHREADS], nthreads = 0, x = 0;
+	pthread_t threadid[MAXTHREADS], nthreads = 0, x = 0, mcthread = 0;
 
 	signal(SIGINT, stop);
 
 	puts("Starting server...");
 	usersfile = fopen("Base.dat", "a+");
-	//serverpipe = popen(LAUNCH_STRING, "a+");
+
+	puts("Launching minecraft server...");
+	if(popen2(LAUNCH_STRING, &serverpipe[WRITE], &serverpipe[READ]) <= 0)
+		puts("Server launch error.");
+	if(pthread_create(&mcthread, NULL, (void *)&f01, NULL) != 0)
+		puts("thread creating error");
 
 	puts("Creating socket...");
 	if ((lsock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
