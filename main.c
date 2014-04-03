@@ -10,6 +10,8 @@
 #include <signal.h>
 
 #define BUFSIZE 8192
+#define READ 0
+#define WRITE 1
 
     /* SETTINGS */
 #define SERVER_PORT 65533
@@ -20,9 +22,6 @@
 
 FILE * usersfile;
 int lsock = 0, serverpipe[2];
-
-#define READ 0
-#define WRITE 1
 
 pid_t popen2(const char *command, int *infp, int *outfp){
 	int p_stdin[2], p_stdout[2];
@@ -121,7 +120,7 @@ void stop(){
 	exit(0);
 }
 
-void ExitListener(int sig){
+void exitListener(int sig){
     signal(sig, SIG_IGN);
     stop();
 }
@@ -129,12 +128,12 @@ void ExitListener(int sig){
 bool haveLoginAndPassword(char *login, char *password){
 	char buf[128], buf1[64], buf2[64];
 
+	fseek(usersfile, 0, SEEK_SET);
 	while(fgets(buf, sizeof(buf), usersfile) != NULL){
 		getXMLData(buf, "login", buf1);
 		getXMLData(buf, "password", buf2);
-		if(strcmp(buf1, login) == 0 &&  strcmp(buf2, password) == 0) {fseek(usersfile, 0, SEEK_SET);return true;}
+		if(strcmp(buf1, login) == 0 &&  strcmp(buf2, password) == 0) return true;
 	}
-	fseek(usersfile, 0, SEEK_SET);
 	return false;
 }
 
@@ -174,6 +173,7 @@ void processAnswer(char *result, char *message){
 			char mail[50], fmail[50], flogin[50];
 			getXMLData(message, "mail", mail);
 
+			fseek(usersfile, 0, SEEK_SET);
 			while(fgets(buf, sizeof(buf), usersfile) != NULL){
 				getXMLData(buf, "login", flogin);
 				getXMLData(buf, "mail", fmail);
@@ -183,7 +183,6 @@ void processAnswer(char *result, char *message){
 			}
 			sprintf(buf, "<login>%s</login><password>%s</password><mail>%s</mail>\n", login, password, mail);
 			fputs(buf, usersfile);
-			fseek(usersfile, 0, SEEK_SET);
 			strcpy(result, "<response>success</response>");
 		} else if(strcmp(type, "gameauth") == 0 && hasXMLKey(message, "md5")){
 			char md5[50];
@@ -219,52 +218,15 @@ void *f01(void *data){
 
 	while (1){
 		read(serverpipe[READ], buf, BUFSIZE - 1);
-		printf("[SERVER]%s\n", buf);
+		printf("[SERVER]%s", buf);
+		memset(buf, 0, strlen(buf));
 	}
 	return NULL;
 }
 
 void *f02(void *data){
-
-	return NULL;
-}
-
-int main(int argc, char **argv)
-{
-	int on = 1, asock = 0;
-	struct  sockaddr_in sa;
-	pthread_t threadid[MAXTHREADS], nthreads = 0, x = 0, mcthread = 0;
-
-	signal(SIGINT, stop);
-
-	puts("Starting server...");
-	usersfile = fopen("Base.dat", "a+");
-
-	puts("Launching minecraft server...");
-	if(popen2(LAUNCH_STRING, &serverpipe[WRITE], &serverpipe[READ]) <= 0)
-		puts("Server launch error.");
-	if(pthread_create(&mcthread, NULL, (void *)&f01, NULL) != 0)
-		puts("thread creating error");
-
-	puts("Creating socket...");
-	if ((lsock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-		puts("Socket creating error");
-
-	if(setsockopt(lsock, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0)
-		puts("setsockopt error");
-
-	memset(&sa, 0, sizeof(sa));
-	sa.sin_family = AF_INET;
-	sa.sin_port   = htons(SERVER_PORT);
-	sa.sin_addr.s_addr = htonl(INADDR_ANY);
-
-	if((bind(lsock, (struct sockaddr *) &sa, sizeof(sa))) < 0)
-		puts("bind error");
-
-	if((listen(lsock, 5)) < 0)
-		puts("listen error");
-
-	puts("Done!\nWaiting from connections...");
+	int x = 0, asock = 0;
+	pthread_t threadid[MAXTHREADS], nthreads = 0;
 
 	while(1){
 		if((asock = accept(lsock, NULL, NULL)) < 0)
@@ -280,6 +242,64 @@ int main(int argc, char **argv)
 	for(x = 0; x < nthreads; x++)
 		if(pthread_join(threadid[x], NULL) < 0)
 			puts("pthread join error");
+	return NULL;
+}
 
+int main(int argc, char **argv)
+{
+	int on = 1;
+	struct  sockaddr_in sa;
+	pthread_t mcthread = 0, sockthread = 0;
+	char line[256];
+	ssize_t read;
+
+	signal(SIGINT, exitListener);
+
+	puts("Starting server...");
+	usersfile = fopen("Base.dat", "a+");
+	if(usersfile == NULL){
+		puts("Error opening file"); return -1;
+	}
+
+	puts("Launching minecraft server...");
+	if(popen2(LAUNCH_STRING, &serverpipe[WRITE], &serverpipe[READ]) <= 0){
+		puts("Server launch error.");stop();}
+	if(pthread_create(&mcthread, NULL, (void *)&f01, NULL) != 0){
+		puts("thread creating error");stop();}
+
+	puts("Creating socket...");
+	if ((lsock = socket(AF_INET, SOCK_STREAM, 0)) < 0){
+		puts("Socket creating error");stop();}
+
+	if(setsockopt(lsock, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0){
+		puts("setsockopt error");stop();}
+
+	memset(&sa, 0, sizeof(sa));
+	sa.sin_family = AF_INET;
+	sa.sin_port   = htons(SERVER_PORT);
+	sa.sin_addr.s_addr = htonl(INADDR_ANY);
+
+	if((bind(lsock, (struct sockaddr *) &sa, sizeof(sa))) < 0){
+		puts("bind error");stop();}
+
+	if((listen(lsock, 5)) < 0){
+		puts("listen error");stop();}
+
+	puts("Done!\nWaiting from connections...");
+
+	if(pthread_create(&sockthread, NULL, (void *)&f02, NULL) != 0)
+		puts("thread creating error");
+
+	while(fgets(line, sizeof(line), stdin) != NULL){
+		sendMessage(line);
+		if(strcmp(line, "stop") == 0){
+			puts("Waiting for server stopping...");
+			sleep(5);
+			stop();
+		}
+		memset(line, '\0', sizeof(line));
+	}
+
+	stop();
 	return 0;
 }
