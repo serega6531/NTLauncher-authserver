@@ -138,7 +138,7 @@ bool haveLoginAndPassword(char *login, char *password){
 }
 
 void sendMessage(char *message){
-	write(serverpipe[WRITE], message, sizeof(message));
+	write(serverpipe[WRITE], message, strlen(message));
 }
 
 void addPlayer(char *player){
@@ -250,8 +250,7 @@ int main(int argc, char **argv)
 	int on = 1;
 	struct  sockaddr_in sa;
 	pthread_t mcthread = 0, sockthread = 0;
-	char line[256];
-	ssize_t read;
+	char line[75];
 
 	signal(SIGINT, exitListener);
 
@@ -297,9 +296,9 @@ int main(int argc, char **argv)
 			sleep(5);
 			stop();
 		}
-		memset(line, '\0', sizeof(line));
 	}
 
 	stop();
 	return 0;
 }
+
