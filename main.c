@@ -13,15 +13,24 @@
 #define READ 0
 #define WRITE 1
 
+#define arrlen(arr) sizeof(arr)/sizeof(arr[0])
+
     /* SETTINGS */
 #define SERVER_PORT 65533
 #define MAXTHREADS 15
-#define CLIENT_VERSION 1
+#define CLIENT_VERSION 0
 #define CLIENT_MD5 "098f6bcd4621d373cade4e832627b4f6"
 #define LAUNCH_STRING "cd server && java -Xms512M -Xmx512M -jar craftbukkit.jar"
+#define TIME_TO_ENTER 90
+
+struct playertime{
+	char name[20];
+	short unsigned int time;
+};
 
 FILE * usersfile;
 int lsock = 0, serverpipe[2];
+struct playertime* times;
 
 pid_t popen2(const char *command, int *infp, int *outfp){
 	int p_stdin[2], p_stdout[2];
@@ -74,6 +83,12 @@ int strpos(char *str, char *substr){
 	return pos;
 }
 
+void remove_element(struct playertime *array, int index)
+{
+   int i;
+   for(i = index; i < arrlen(array) - 1; i++) array[i] = array[i + 1];
+}
+
 bool isXML(char *string){
 	int a, b, c, i;
 
@@ -117,6 +132,7 @@ void stop(){
 	close(serverpipe[0]);
 	close(serverpipe[1]);
 	close(lsock);
+	free(times);
 	exit(0);
 }
 
@@ -155,14 +171,31 @@ void removePlayer(char *player){
 	sendMessage(message);
 }
 
-void processAnswer(char *result, char *message){
-	char buf[100];
+void addToTimeList(char *name){
+	unsigned int pos;
 
+	times = (struct playertime*) realloc(times, sizeof(times) + sizeof(struct playertime));
+	pos = arrlen(times) - 1;
+	strcpy(times[pos].name, name);
+	times[pos].time = TIME_TO_ENTER;
+}
+
+void removeFromTimeList(int pos){
+	removePlayer(times[pos].name);
+	remove_element(times, pos);
+	times = (struct playertime*) realloc(times, sizeof(times) - sizeof(struct playertime));
+}
+
+void processAnswer(char *result, char *message){
+	char buf[100], print[BUFSIZE];
+
+	sprintf(print, "=======================================================\nClient send message.\nRaw message: %s\n", message);
 	if(isXML(message) && hasXMLKey(message, "type") && hasXMLKey(message, "login") && hasXMLKey(message, "password")){
 		char type[strlen(message)], login[strlen(message)], password[strlen(message)];
 		getXMLData(message, "type", type);
 		getXMLData(message, "login", login);
 		getXMLData(message, "password", password);
+		sprintf(print, "%sType: %s\nLogin: %s\nPassword: %s\n", print, type, login, password);
 		if(strcmp(type, "auth") == 0){
 			if (haveLoginAndPassword(login, password)){
 				sprintf(result, "<response>success</response><version>%d</versions>", CLIENT_VERSION);
@@ -170,23 +203,31 @@ void processAnswer(char *result, char *message){
 				strcpy(result, "<response>bad login</response>");
 			}
 		} else if(strcmp(type, "reg") == 0 && hasXMLKey(message, "mail")){
+			bool res = true;
+
 			char mail[50], fmail[50], flogin[50];
 			getXMLData(message, "mail", mail);
+			sprintf(print, "%sMail: %s\n", print, mail);
 
 			fseek(usersfile, 0, SEEK_SET);
 			while(fgets(buf, sizeof(buf), usersfile) != NULL){
 				getXMLData(buf, "login", flogin);
 				getXMLData(buf, "mail", fmail);
 				if(strcmp(login, flogin) == 0 || strcmp(mail, fmail) == 0){
-					strcpy(result, "<response>already exists</response>");return;
+					strcpy(result, "<response>already exists</response>");
+					res = false;
+					break;
 				}
 			}
-			sprintf(buf, "<login>%s</login><password>%s</password><mail>%s</mail>\n", login, password, mail);
-			fputs(buf, usersfile);
-			strcpy(result, "<response>success</response>");
+			if(res){
+				sprintf(buf, "<login>%s</login><password>%s</password><mail>%s</mail>\n", login, password, mail);
+				fputs(buf, usersfile);
+				strcpy(result, "<response>success</response>");
+			}
 		} else if(strcmp(type, "gameauth") == 0 && hasXMLKey(message, "md5")){
 			char md5[50];
 			getXMLData(message, "md5", md5);
+			sprintf(print, "%sMD5: %s\n", print, md5);
 
 			if(haveLoginAndPassword(login, password)){
 				if(strcmp(md5, CLIENT_MD5) == 0){
@@ -196,6 +237,8 @@ void processAnswer(char *result, char *message){
 			} else strcpy(result, "<response>bad login</response>");
 		} else strcpy(result, "<response>bad login</response>");
 	} else strcpy(result, "<response>bad login</response>");
+	sprintf(print, "%sResponse: %s\n=======================================================", print, result);
+	puts(print);
 }
 
 void * f00(void *data)
@@ -204,11 +247,9 @@ void * f00(void *data)
         int asock = *(int *) data, nread = 0;
 
         while((nread = read(asock, buf, BUFSIZE)) > 0){
-        	printf("Catch: %s", buf);
         	processAnswer(answer, buf);
         	write(asock, answer, strlen(answer));
         	shutdown(asock, 0);
-        	return NULL;
         }
         return NULL;
 }
@@ -245,12 +286,26 @@ void *f02(void *data){
 	return NULL;
 }
 
+void *f03(void *data){
+	int i;
+
+	while(1){
+		i = 0;
+		for(; i < arrlen(times); i++){
+			times[i].time--;
+			if(times[i].time == 0) removeFromTimeList(i);
+		}
+		sleep(1);
+	}
+	return NULL;
+}
+
 int main(int argc, char **argv)
 {
 	int on = 1;
 	struct  sockaddr_in sa;
-	pthread_t mcthread = 0, sockthread = 0;
-	char line[75];
+	pthread_t mcthread = 0, sockthread = 0, removethread = 0;
+	char line[150] = {'\0'};
 
 	signal(SIGINT, exitListener);
 
@@ -260,18 +315,32 @@ int main(int argc, char **argv)
 		puts("Error opening file"); return -1;
 	}
 
+	times = (struct playertime*)malloc(sizeof(struct playertime));
+	if(times == NULL){
+		puts("Error allocating memory.");
+		stop();
+	}
+
 	puts("Launching minecraft server...");
 	if(popen2(LAUNCH_STRING, &serverpipe[WRITE], &serverpipe[READ]) <= 0){
-		puts("Server launch error.");stop();}
+		puts("Server launch error.");
+		stop();
+	}
 	if(pthread_create(&mcthread, NULL, (void *)&f01, NULL) != 0){
-		puts("thread creating error");stop();}
+		puts("thread creating error");
+		stop();
+	}
 
 	puts("Creating socket...");
 	if ((lsock = socket(AF_INET, SOCK_STREAM, 0)) < 0){
-		puts("Socket creating error");stop();}
+		puts("Socket creating error");
+		stop();
+	}
 
 	if(setsockopt(lsock, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0){
-		puts("setsockopt error");stop();}
+		puts("setsockopt error");
+		stop();
+	}
 
 	memset(&sa, 0, sizeof(sa));
 	sa.sin_family = AF_INET;
@@ -279,26 +348,29 @@ int main(int argc, char **argv)
 	sa.sin_addr.s_addr = htonl(INADDR_ANY);
 
 	if((bind(lsock, (struct sockaddr *) &sa, sizeof(sa))) < 0){
-		puts("bind error");stop();}
+		puts("bind error");
+		stop();
+	}
 
 	if((listen(lsock, 5)) < 0){
-		puts("listen error");stop();}
+		puts("listen error");
+		stop();
+	}
 
 	puts("Done!\nWaiting from connections...");
 
 	if(pthread_create(&sockthread, NULL, (void *)&f02, NULL) != 0)
 		puts("thread creating error");
 
+	if(pthread_create(&removethread, NULL, (void *)&f03, NULL) != 0){
+		puts("thread creating error");
+		stop();
+	}
+
 	while(fgets(line, sizeof(line), stdin) != NULL){
 		sendMessage(line);
-		if(strcmp(line, "stop") == 0){
-			puts("Waiting for server stopping...");
-			sleep(5);
-			stop();
-		}
 	}
 
 	stop();
 	return 0;
 }
-
