@@ -23,8 +23,8 @@
 #define WRITE 1
 
 struct playertime {
-	char name[20];
 	short unsigned int time;
+	char name[20];
 };
 
 typedef struct el {
@@ -78,15 +78,15 @@ void strcut(char *str, int begin, int len) {
 		len = l - begin;
 	if (begin + len > l)
 		len = l - begin;
-	strncpy(str, str + begin, len);
+	memmove(str, str + begin, len);
 	str[len] = '\0';
 }
 
 int strpos(char *str, char *substr) {
-	int pos = strstr(str, substr) - str;
+	int pos = strstr(str, substr);
 	if (!pos)
 		return 0;
-	return pos;
+	return pos - str;
 }
 
 bool isXML(char *string) {
@@ -117,7 +117,7 @@ bool hasXMLKey(char *string, char *key) {
 }
 
 void getXMLData(char *string, char *key, char *result) {
-	char buf[50], buf2[strlen(string)];
+	char buf[strlen(key) + 4], buf2[strlen(string)];
 	int p, s;
 
 	strcpy(buf2, string);
@@ -125,8 +125,12 @@ void getXMLData(char *string, char *key, char *result) {
 	p = strpos(buf2, buf) + strlen(buf);
 	sprintf(buf, "</%s>", key);
 	s = strpos(buf2, buf);
-	strcut(buf2, p, s - p);
-	strcpy(result, buf2);
+	if(s - p > 0){
+		strcut(buf2, p, s - p);
+		strcpy(result, buf2);
+	} else {
+		strcpy(result, "");
+	}
 }
 
 void stop() {
@@ -197,8 +201,8 @@ void processAnswer(char *result, char *message) {
 	sprintf(print, "=============================================================\nClient send message.\nRaw message: %s\n", message);
 	if (isXML(message) && hasXMLKey(message, "type")
 			&& hasXMLKey(message, "login") && hasXMLKey(message, "password")) {
-		char type[strlen(message)], login[strlen(message)], password[strlen(
-				message)];
+		int mlen = strlen(message);
+		char type[mlen], login[mlen], password[mlen];
 		getXMLData(message, "type", type);
 		getXMLData(message, "login", login);
 		getXMLData(message, "password", password);
@@ -215,7 +219,7 @@ void processAnswer(char *result, char *message) {
 		} else if (strcmp(type, "reg") == 0 && hasXMLKey(message, "mail")) {
 			bool res = true;
 
-			char mail[50], fmail[50], flogin[50];
+			char mail[mlen], fmail[mlen], flogin[mlen];
 			getXMLData(message, "mail", mail);
 			sprintf(print, "%sMail: %s\n", print, mail);
 
@@ -237,7 +241,7 @@ void processAnswer(char *result, char *message) {
 				strcpy(result, "<response>success</response>");
 			}
 		} else if (strcmp(type, "gameauth") == 0 && hasXMLKey(message, "md5")) {
-			char md5[50];
+			char md5[mlen];
 			getXMLData(message, "md5", md5);
 			sprintf(print, "%sMD5: %s\n", print, md5);
 
