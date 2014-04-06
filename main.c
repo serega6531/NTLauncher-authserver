@@ -32,7 +32,7 @@ typedef struct el {
     struct el *next;
 } el;
 
-FILE * usersfile;
+FILE * usersfile, * hwidfile;
 int lsock = 0, serverpipe[2];
 el *head = NULL;
 
@@ -161,6 +161,17 @@ bool haveLoginAndPassword(char *login, char *password) {
 	return false;
 }
 
+bool isHWIDBanned(char *hwid){
+	char buf[35];
+
+	fseek(hwidfile, 0, SEEK_SET);
+	while (fgets(buf, sizeof(buf), hwidfile) != NULL ) {
+		if (strcmp(buf, hwid) == 0)
+			return true;
+	}
+	return false;
+}
+
 void sendMessage(char *message) {
 	write(serverpipe[WRITE], message, strlen(message));
 }
@@ -241,16 +252,27 @@ void processAnswer(char *result, char *message) {
 				strcpy(result, "<response>success</response>");
 			}
 		} else if (strcmp(type, "gameauth") == 0 && hasXMLKey(message, "md5")) {
-			char md5[mlen];
+			char md5[mlen], hwid[mlen];
+			bool res = false;
+
 			getXMLData(message, "md5", md5);
+			getXMLData(message, "hwid", hwid);
 			sprintf(print, "%sMD5: %s\n", print, md5);
 
 			if (haveLoginAndPassword(login, password)) {
 				if (strcmp(md5, CLIENT_MD5) == 0) {
 					addPlayer(login);
-					strcpy(result, "<response>success</response>");
-				} else
+					res = true;
+				} else {
 					strcpy(result, "<response>bad checksum</response>");
+				}
+				if(!isHWIDBanned(hwid))
+					res = true;
+				else {
+					strcpy(result, "<response>banned</response>");
+				}
+				if(res)
+					strcpy(result, "<response>success</response>");
 			} else
 				strcpy(result, "<response>bad login</response>");
 		} else
@@ -333,7 +355,8 @@ int main(int argc, char **argv) {
 
 	puts("Starting server...");
 	usersfile = fopen("Base.dat", "a+");
-	if (usersfile == NULL ) {
+	hwidfile = fopen("BannedHWIDs.dat", "a+");
+	if (usersfile == NULL || hwidfile == NULL) {
 		puts("Error opening file");
 		return -1;
 	}
