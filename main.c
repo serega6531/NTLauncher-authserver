@@ -83,7 +83,7 @@ void strcut(char *str, int begin, int len) {
 }
 
 int strpos(char *str, char *substr) {
-	int pos = strstr(str, substr);
+	char *pos = strstr(str, substr);
 	if (!pos)
 		return 0;
 	return pos - str;
