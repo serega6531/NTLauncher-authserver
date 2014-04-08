@@ -29,10 +29,10 @@ struct playertime {
 
 typedef struct el {
 	struct playertime pt;
-    struct el *next;
+	struct el *next;
 } el;
 
-FILE * usersfile, * hwidfile;
+FILE * usersfile, *hwidfile;
 int lsock = 0, serverpipe[2];
 el *head = NULL;
 
@@ -116,26 +116,33 @@ bool hasXMLKey(char *string, char *key) {
 	return (strstr(string, buf1) != NULL && strstr(string, buf2) != NULL );
 }
 
-void getXMLData(char *string, char *key, char *result) {
-	char buf[strlen(key) + 4], buf2[strlen(string)];
-	int p, s;
+void getXMLData(char *string, char *key, char *result, int maxlen) {
+	char buf[64];
+	char *start, *end;
+	int len;
 
-	strcpy(buf2, string);
-	sprintf(buf, "<%s>", key);
-	p = strpos(buf2, buf) + strlen(buf);
-	sprintf(buf, "</%s>", key);
-	s = strpos(buf2, buf);
-	if(s - p > 0){
-		strcut(buf2, p, s - p);
-		strcpy(result, buf2);
-	} else {
-		strcpy(result, "");
-	}
+	len = snprintf(buf, sizeof buf - 1, "<%s>", key);
+	start = strstr(string, buf);
+	snprintf(buf, sizeof(buf) - 1, "</%s>", key);
+	end = strstr(string, buf);
+
+	if (!start || !end || start > end)
+		return;
+
+	start += len;
+	len = end - start;
+
+	if (len > maxlen)
+		len = maxlen;
+
+	memcpy(result, start, len);
+	result[len] = '\0';
 }
 
 void stop() {
 	puts("Stopping server...");
 	fclose(usersfile);
+	fclose(hwidfile);
 	close(serverpipe[0]);
 	close(serverpipe[1]);
 	close(lsock);
@@ -153,15 +160,15 @@ bool haveLoginAndPassword(char *login, char *password) {
 
 	fseek(usersfile, 0, SEEK_SET);
 	while (fgets(buf, sizeof(buf), usersfile) != NULL ) {
-		getXMLData(buf, "login", buf1);
-		getXMLData(buf, "password", buf2);
+		getXMLData(buf, "login", buf1, 63);
+		getXMLData(buf, "password", buf2, 63);
 		if (strcmp(buf1, login) == 0 && strcmp(buf2, password) == 0)
 			return true;
 	}
 	return false;
 }
 
-bool isHWIDBanned(char *hwid){
+bool isHWIDBanned(char *hwid) {
 	char buf[35];
 
 	fseek(hwidfile, 0, SEEK_SET);
@@ -180,7 +187,8 @@ void addToTimeList(char *name) {
 	el *element;
 	struct playertime ptime;
 
-	if ((element = (el*)malloc(sizeof(el))) == NULL) stop();
+	if ((element = (el*) malloc(sizeof(el))) == NULL )
+		stop();
 	strcpy(ptime.name, name);
 	ptime.time = TIME_TO_ENTER;
 	element->pt = ptime;
@@ -209,14 +217,16 @@ void removePlayer(char *player) {
 void processAnswer(char *result, char *message) {
 	char buf[100], print[BUFSIZE];
 
-	sprintf(print, "=============================================================\nClient send message.\nRaw message: %s\n", message);
+	sprintf(print,
+			"=============================================================\nClient send message.\nRaw message: %s\n",
+			message);
 	if (isXML(message) && hasXMLKey(message, "type")
 			&& hasXMLKey(message, "login") && hasXMLKey(message, "password")) {
-		int mlen = strlen(message);
+		int mlen = strlen(message) - 1;
 		char type[mlen], login[mlen], password[mlen];
-		getXMLData(message, "type", type);
-		getXMLData(message, "login", login);
-		getXMLData(message, "password", password);
+		getXMLData(message, "type", type, mlen - 1);
+		getXMLData(message, "login", login, mlen - 1);
+		getXMLData(message, "password", password, mlen - 1);
 		sprintf(print, "%sType: %s\nLogin: %s\nPassword: %s\n", print, type,
 				login, password);
 		if (strcmp(type, "auth") == 0) {
@@ -231,13 +241,13 @@ void processAnswer(char *result, char *message) {
 			bool res = true;
 
 			char mail[mlen], fmail[mlen], flogin[mlen];
-			getXMLData(message, "mail", mail);
+			getXMLData(message, "mail", mail, mlen - 1);
 			sprintf(print, "%sMail: %s\n", print, mail);
 
 			fseek(usersfile, 0, SEEK_SET);
 			while (fgets(buf, sizeof(buf), usersfile) != NULL ) {
-				getXMLData(buf, "login", flogin);
-				getXMLData(buf, "mail", fmail);
+				getXMLData(buf, "login", flogin, mlen - 1);
+				getXMLData(buf, "mail", fmail, mlen - 1);
 				if (strcmp(login, flogin) == 0 || strcmp(mail, fmail) == 0) {
 					strcpy(result, "<response>already exists</response>");
 					res = false;
@@ -255,9 +265,9 @@ void processAnswer(char *result, char *message) {
 			char md5[mlen], hwid[mlen];
 			bool res = false;
 
-			getXMLData(message, "md5", md5);
-			getXMLData(message, "hwid", hwid);
-			sprintf(print, "%sMD5: %s\n", print, md5);
+			getXMLData(message, "md5", md5, mlen - 1);
+			getXMLData(message, "hwid", hwid, mlen - 1);
+			sprintf(print, "%sMD5: %s\nHWID: %s\n", print, md5, hwid);
 
 			if (haveLoginAndPassword(login, password)) {
 				if (strcmp(md5, CLIENT_MD5) == 0) {
@@ -266,12 +276,12 @@ void processAnswer(char *result, char *message) {
 				} else {
 					strcpy(result, "<response>bad checksum</response>");
 				}
-				if(!isHWIDBanned(hwid))
+				if (!isHWIDBanned(hwid))
 					res = true;
 				else {
 					strcpy(result, "<response>banned</response>");
 				}
-				if(res)
+				if (res)
 					strcpy(result, "<response>success</response>");
 			} else
 				strcpy(result, "<response>bad login</response>");
@@ -332,17 +342,18 @@ void *f02(void *data) {
 void *f03(void *data) {
 	el *tmp;
 
-	while(1) {
-		LL_FOREACH(head, tmp){
+	while (1) {
+		LL_FOREACH(head, tmp)
+		{
 			tmp->pt.time--;
-			if(tmp->pt.time == 0){
+			if (tmp->pt.time == 0) {
 				removePlayer(tmp->pt.name);
 				removeFromTimeList(tmp);
 			}
 		}
 		sleep(1);
 	}
-	return NULL;
+	return NULL ;
 }
 
 int main(int argc, char **argv) {
@@ -356,7 +367,7 @@ int main(int argc, char **argv) {
 	puts("Starting server...");
 	usersfile = fopen("Base.dat", "a+");
 	hwidfile = fopen("BannedHWIDs.dat", "a+");
-	if (usersfile == NULL || hwidfile == NULL) {
+	if (usersfile == NULL || hwidfile == NULL ) {
 		puts("Error opening file");
 		return -1;
 	}
@@ -399,7 +410,7 @@ int main(int argc, char **argv) {
 
 	puts("Done!\nWaiting from connections...");
 
-	if (pthread_create(&sockthread, NULL, (void *) &f02, NULL ) != 0){
+	if (pthread_create(&sockthread, NULL, (void *) &f02, NULL ) != 0) {
 		puts("thread creating error");
 		stop();
 	}
@@ -416,3 +427,6 @@ int main(int argc, char **argv) {
 	stop();
 	return 0;
 }
+
+/* TEST MESSAGES 
+<type>login</type><login>test</login><password>test</password>*/
