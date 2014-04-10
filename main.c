@@ -17,6 +17,7 @@
 #define CLIENT_MD5 "098f6bcd4621d373cade4e832627b4f6"
 #define LAUNCH_STRING "cd server && java -Xms512M -Xmx512M -jar craftbukkit.jar"
 #define TIME_TO_ENTER 90
+#define HWIDS_DIR "PlayersHWIDs/"
 
 #define BUFSIZE 8192
 #define READ 0
@@ -126,8 +127,10 @@ void getXMLData(char *string, char *key, char *result, int maxlen) {
 	snprintf(buf, sizeof(buf) - 1, "</%s>", key);
 	end = strstr(string, buf);
 
-	if (!start || !end || start > end)
+	if (!start || !end || start > end) {
+		result[0] = '\0';
 		return;
+	}
 
 	start += len;
 	len = end - start;
@@ -169,14 +172,41 @@ bool haveLoginAndPassword(char *login, char *password) {
 }
 
 bool isHWIDBanned(char *hwid) {
-	char buf[35];
+	char buf[50];
+	char fhwid[33];
 
 	fseek(hwidfile, 0, SEEK_SET);
 	while (fgets(buf, sizeof(buf), hwidfile) != NULL ) {
-		if (strcmp(buf, hwid) == 0)
+		getXMLData(buf, "hwid", fhwid, 32);
+		if (strcmp(fhwid, hwid) == 0)
 			return true;
 	}
 	return false;
+}
+
+bool hasHWIDInBase(char *player, char *hwid){
+	char buf[75];
+
+	snprintf(buf, sizeof(buf), "%s%s.dat", HWIDS_DIR, player);
+	FILE * file = fopen(buf, "r");
+	while (fgets(buf, sizeof(buf), file) != NULL ) {
+			if (strcmp(buf, hwid) == 0){
+				fclose(file);
+				return true;
+			}
+	}
+	fclose(file);
+	return false;
+}
+
+void addHWIDToList(char *player, char *hwid){
+	char buf[75];
+
+	snprintf(buf, sizeof(buf), "%s%s.dat", HWIDS_DIR, player);
+	FILE * file = fopen(buf, "r");
+	sprintf(buf, "%s\n", hwid);
+	fputs(hwid, usersfile);
+	fclose(file);
 }
 
 void sendMessage(char *message) {
@@ -215,7 +245,7 @@ void removePlayer(char *player) {
 }
 
 void processAnswer(char *result, char *message) {
-	char buf[100], print[BUFSIZE];
+	char print[BUFSIZE];
 
 	sprintf(print,
 			"=============================================================\nClient send message.\nRaw message: %s\n",
@@ -237,12 +267,15 @@ void processAnswer(char *result, char *message) {
 			} else {
 				strcpy(result, "<response>bad login</response>");
 			}
-		} else if (strcmp(type, "reg") == 0 && hasXMLKey(message, "mail")) {
+		} else if (strcmp(type, "reg") == 0 && hasXMLKey(message, "mail")
+				&& hasXMLKey(message, "hwid")) {
 			bool res = true;
+			char mail[mlen], fmail[mlen], flogin[mlen], hwid[mlen], buf[75];
 
-			char mail[mlen], fmail[mlen], flogin[mlen];
 			getXMLData(message, "mail", mail, mlen - 1);
-			sprintf(print, "%sMail: %s\n", print, mail);
+			getXMLData(message, "hwid", hwid, mlen - 1);
+
+			sprintf(print, "%sMail: %s\nHWID: %s\n", print, mail, hwid);
 
 			fseek(usersfile, 0, SEEK_SET);
 			while (fgets(buf, sizeof(buf), usersfile) != NULL ) {
@@ -254,6 +287,12 @@ void processAnswer(char *result, char *message) {
 					break;
 				}
 			}
+			if (isHWIDBanned(hwid)) {
+				strcpy(result, "<response>banned</response>");
+				res = false;
+			} else {
+				addHWIDToList(login, hwid);
+			}
 			if (res) {
 				sprintf(buf,
 						"<login>%s</login><password>%s</password><mail>%s</mail>\n",
@@ -261,9 +300,10 @@ void processAnswer(char *result, char *message) {
 				fputs(buf, usersfile);
 				strcpy(result, "<response>success</response>");
 			}
-		} else if (strcmp(type, "gameauth") == 0 && hasXMLKey(message, "md5")) {
+		} else if (strcmp(type, "gameauth") == 0 && hasXMLKey(message, "md5")
+				&& hasXMLKey(message, "hwid")) {
 			char md5[mlen], hwid[mlen];
-			bool res = false;
+			bool res = true;
 
 			getXMLData(message, "md5", md5, mlen - 1);
 			getXMLData(message, "hwid", hwid, mlen - 1);
@@ -272,14 +312,17 @@ void processAnswer(char *result, char *message) {
 			if (haveLoginAndPassword(login, password)) {
 				if (strcmp(md5, CLIENT_MD5) == 0) {
 					addPlayer(login);
-					res = true;
 				} else {
 					strcpy(result, "<response>bad checksum</response>");
+					res = false;
 				}
-				if (!isHWIDBanned(hwid))
-					res = true;
-				else {
+				if (!isHWIDBanned(hwid)){
+					if(!hasHWIDInBase(login, hwid)){
+						addHWIDToList(login, hwid);
+					}
+				} else {
 					strcpy(result, "<response>banned</response>");
+					res = false;
 				}
 				if (res)
 					strcpy(result, "<response>success</response>");
@@ -429,4 +472,7 @@ int main(int argc, char **argv) {
 }
 
 /* TEST MESSAGES 
-<type>login</type><login>test</login><password>test</password>*/
+ <type>auth</type><login>test</login><password>test</password>
+ <type>reg</type><login>test</login><password>test</password><mail>test@test.com</mail>
+ <type>gameauth</type><login>test</login><password>test</password><md5>test</md5><hwid>test</hwid>
+ */
