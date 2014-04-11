@@ -339,6 +339,37 @@ void processAnswer(char *result, char *message) {
 	puts(print);
 }
 
+bool processConsoleMessage(char *message){
+	char command[strlen(message)], arg[strlen(message)], buf[100];
+
+	if(sscanf(message, "%s %s", command, arg) < 2)
+		return false;
+	if(strcmp(command, "banuser") == 0){
+		snprintf(buf, sizeof(buf), "%s%s_HWID.dat", HWIDS_DIR, arg);
+		FILE * file = fopen(buf, "r");
+		if(file != NULL)
+			while(fgets(buf, sizeof(buf), file) != NULL){
+				snprintf(buf, sizeof(buf), "<hwid>%s</hwid><player>%s</player>", buf, arg);
+				fputs(buf, hwidfile);
+			}
+		fclose(file);
+		puts("Banned!");
+		return true;
+	} else if(strcmp(command, "banhwid") == 0){
+		snprintf(buf, sizeof(buf), "<hwid>%s</hwid>", arg);
+		fputs(buf, hwidfile);
+		puts("Banned!");
+		return true;
+	} else if(strcmp(command, "stop") == 0){
+		sendMessage("stop\n");
+		puts("Waiting for server stopping...");
+		sleep(3);
+		stop();
+		return true;
+	}
+	return false;
+}
+
 void * f00(void *data) {
 	char buf[BUFSIZE], answer[70];
 	int asock = *(int *) data, nread = 0;
@@ -470,7 +501,8 @@ int main(int argc, char **argv) {
 	}
 
 	while (fgets(line, sizeof(line), stdin) != NULL ) {
-		sendMessage(line);
+		if(!processConsoleMessage(line))
+			sendMessage(line);
 	}
 
 	stop();
