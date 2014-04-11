@@ -15,7 +15,7 @@
 #define SERVER_PORT 65533
 #define MAXTHREADS 15
 #define CLIENT_VERSION 0
-#define CLIENT_MD5 "098f6bcd4621d373cade4e832627b4f6"
+#define CLIENT_MD5 "58e8c6b9374e0d4ff71df7ba3ba136cc"
 #define LAUNCH_STRING "cd server && java -Xms512M -Xmx512M -jar craftbukkit.jar"
 #define TIME_TO_ENTER 90
 #define HWIDS_DIR "PlayersHWIDs/"
@@ -173,12 +173,12 @@ bool haveLoginAndPassword(char *login, char *password) {
 }
 
 bool isHWIDBanned(char *hwid) {
-	char buf[50];
-	char fhwid[33];
+	char buf[100];
+	char fhwid[50];
 
 	fseek(hwidfile, 0, SEEK_SET);
 	while (fgets(buf, sizeof(buf), hwidfile) != NULL ) {
-		getXMLData(buf, "hwid", fhwid, 32);
+		getXMLData(buf, "hwid", fhwid, 49);
 		if (strcmp(fhwid, hwid) == 0)
 			return true;
 	}
@@ -186,7 +186,7 @@ bool isHWIDBanned(char *hwid) {
 }
 
 bool hasHWIDInBase(char *player, char *hwid) {
-	char buf[75];
+	char buf[40];
 
 	snprintf(buf, sizeof(buf), "%s%s_HWID.dat", HWIDS_DIR, player);
 	FILE * file = fopen(buf, "r");
@@ -278,21 +278,24 @@ void processAnswer(char *result, char *message) {
 
 			sprintf(print, "%sMail: %s\nHWID: %s\n", print, mail, hwid);
 
-			fseek(usersfile, 0, SEEK_SET);
-			while (fgets(buf, sizeof(buf), usersfile) != NULL ) {
-				getXMLData(buf, "login", flogin, mlen - 1);
-				getXMLData(buf, "mail", fmail, mlen - 1);
-				if (strcmp(login, flogin) == 0 || strcmp(mail, fmail) == 0) {
-					strcpy(result, "<response>already exists</response>");
-					res = false;
-					break;
-				}
-			}
 			if (isHWIDBanned(hwid)) {
 				strcpy(result, "<response>banned</response>");
 				res = false;
 			} else {
 				addHWIDToList(login, hwid);
+			}
+			if (res) {
+				fseek(usersfile, 0, SEEK_SET);
+				while (fgets(buf, sizeof(buf), usersfile) != NULL ) {
+					getXMLData(buf, "login", flogin, mlen - 1);
+					getXMLData(buf, "mail", fmail, mlen - 1);
+					if (strcmp(login, flogin) == 0
+							|| strcmp(mail, fmail) == 0) {
+						strcpy(result, "<response>already exists</response>");
+						res = false;
+						break;
+					}
+				}
 			}
 			if (res) {
 				sprintf(buf,
@@ -310,19 +313,18 @@ void processAnswer(char *result, char *message) {
 			getXMLData(message, "hwid", hwid, mlen - 1);
 			sprintf(print, "%sMD5: %s\nHWID: %s\n", print, md5, hwid);
 
-			if (haveLoginAndPassword(login, password)) {
+			if (!isHWIDBanned(hwid)) {
+				if (!hasHWIDInBase(login, hwid))
+					addHWIDToList(login, hwid);
+			} else {
+				strcpy(result, "<response>banned</response>");
+				res = false;
+			}
+			if (!res || haveLoginAndPassword(login, password)) {
 				if (strcmp(md5, CLIENT_MD5) == 0) {
 					addPlayer(login);
 				} else {
 					strcpy(result, "<response>bad checksum</response>");
-					res = false;
-				}
-				if (!isHWIDBanned(hwid)) {
-					if (!hasHWIDInBase(login, hwid)) {
-						addHWIDToList(login, hwid);
-					}
-				} else {
-					strcpy(result, "<response>banned</response>");
 					res = false;
 				}
 				if (res)
