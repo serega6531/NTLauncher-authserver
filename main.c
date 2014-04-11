@@ -185,22 +185,22 @@ bool isHWIDBanned(char *hwid) {
 	return false;
 }
 
-bool hasHWIDInBase(char *player, char *hwid){
+bool hasHWIDInBase(char *player, char *hwid) {
 	char buf[75];
 
 	snprintf(buf, sizeof(buf), "%s%s_HWID.dat", HWIDS_DIR, player);
 	FILE * file = fopen(buf, "r");
 	while (fgets(buf, sizeof(buf), file) != NULL ) {
-			if (strcmp(buf, hwid) == 0){
-				fclose(file);
-				return true;
-			}
+		if (strcmp(buf, hwid) == 0) {
+			fclose(file);
+			return true;
+		}
 	}
 	fclose(file);
 	return false;
 }
 
-void addHWIDToList(char *player, char *hwid){
+void addHWIDToList(char *player, char *hwid) {
 	char buf[75];
 
 	snprintf(buf, sizeof(buf), "%s%s_HWID.dat", HWIDS_DIR, player);
@@ -317,8 +317,8 @@ void processAnswer(char *result, char *message) {
 					strcpy(result, "<response>bad checksum</response>");
 					res = false;
 				}
-				if (!isHWIDBanned(hwid)){
-					if(!hasHWIDInBase(login, hwid)){
+				if (!isHWIDBanned(hwid)) {
+					if (!hasHWIDInBase(login, hwid)) {
 						addHWIDToList(login, hwid);
 					}
 				} else {
@@ -339,30 +339,31 @@ void processAnswer(char *result, char *message) {
 	puts(print);
 }
 
-bool processConsoleMessage(char *message){
-	char command[strlen(message)], arg[strlen(message)], buf[100];
+bool processConsoleMessage(char *message) {
+	char command[strlen(message)], arg[strlen(message)], buf[50], buf2[100];
 
-	if(strcmp(message, "stop\n") == 0){
+	if (strcmp(message, "stop\n") == 0) {
 		sendMessage("stop\n");
 		puts("Waiting for server stopping...");
 		sleep(3);
 		stop();
 		return true;
 	}
-	if(sscanf(message, "%s %s", command, arg) < 2)
+	if (sscanf(message, "%s %s", command, arg) < 2)
 		return false;
-	if(strcmp(command, "banuser") == 0){
+	if (strcmp(command, "banuser") == 0) {
 		snprintf(buf, sizeof(buf), "%s%s_HWID.dat", HWIDS_DIR, arg);
 		FILE * file = fopen(buf, "r");
-		if(file != NULL)
-			while(fgets(buf, sizeof(buf), file) != NULL){
-				snprintf(buf, sizeof(buf), "<hwid>%s</hwid><player>%s</player>", buf, arg);
-				fputs(buf, hwidfile);
+		if (file != NULL )
+			while (fgets(buf, sizeof(buf), file) != NULL ) {
+				printf("Banned HWID %s\n", buf);
+				snprintf(buf2, sizeof(buf2),
+						"<hwid>%s</hwid><player>%s</player>", buf, arg);
+				fputs(buf2, hwidfile);
+				fclose(file);
 			}
-		fclose(file);
-		puts("Banned!");
 		return true;
-	} else if(strcmp(command, "banhwid") == 0){
+	} else if (strcmp(command, "banhwid") == 0) {
 		snprintf(buf, sizeof(buf), "<hwid>%s</hwid>", arg);
 		fputs(buf, hwidfile);
 		puts("Banned!");
@@ -437,14 +438,14 @@ int main(int argc, char **argv) {
 	struct sockaddr_in sa;
 	pthread_t mcthread = 0, sockthread = 0, removethread = 0;
 	char line[150] = { '\0' };
-	struct stat st = {0};
+	struct stat st = { 0 };
 
 	signal(SIGINT, exitListener);
 
 	puts("Starting server...");
 
 	if (stat(HWIDS_DIR, &st) == -1) {
-	    mkdir(HWIDS_DIR, 0700);
+		mkdir(HWIDS_DIR, 0700);
 	}
 	usersfile = fopen("Base.dat", "a+");
 	hwidfile = fopen("BannedHWIDs.dat", "a+");
@@ -502,7 +503,7 @@ int main(int argc, char **argv) {
 	}
 
 	while (fgets(line, sizeof(line), stdin) != NULL ) {
-		if(!processConsoleMessage(line))
+		if (!processConsoleMessage(line))
 			sendMessage(line);
 	}
 
