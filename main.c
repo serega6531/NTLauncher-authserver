@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <signal.h>
+#include <sys/stat.h>
 #include "utlist.h"
 
 /* SETTINGS */
@@ -187,7 +188,7 @@ bool isHWIDBanned(char *hwid) {
 bool hasHWIDInBase(char *player, char *hwid){
 	char buf[75];
 
-	snprintf(buf, sizeof(buf), "%s%s.dat", HWIDS_DIR, player);
+	snprintf(buf, sizeof(buf), "%s%s_HWID.dat", HWIDS_DIR, player);
 	FILE * file = fopen(buf, "r");
 	while (fgets(buf, sizeof(buf), file) != NULL ) {
 			if (strcmp(buf, hwid) == 0){
@@ -202,10 +203,10 @@ bool hasHWIDInBase(char *player, char *hwid){
 void addHWIDToList(char *player, char *hwid){
 	char buf[75];
 
-	snprintf(buf, sizeof(buf), "%s%s.dat", HWIDS_DIR, player);
-	FILE * file = fopen(buf, "r");
+	snprintf(buf, sizeof(buf), "%s%s_HWID.dat", HWIDS_DIR, player);
+	FILE * file = fopen(buf, "a+");
 	sprintf(buf, "%s\n", hwid);
-	fputs(hwid, usersfile);
+	fputs(hwid, file);
 	fclose(file);
 }
 
@@ -404,10 +405,15 @@ int main(int argc, char **argv) {
 	struct sockaddr_in sa;
 	pthread_t mcthread = 0, sockthread = 0, removethread = 0;
 	char line[150] = { '\0' };
+	struct stat st = {0};
 
 	signal(SIGINT, exitListener);
 
 	puts("Starting server...");
+
+	if (stat(HWIDS_DIR, &st) == -1) {
+	    mkdir(HWIDS_DIR, 0700);
+	}
 	usersfile = fopen("Base.dat", "a+");
 	hwidfile = fopen("BannedHWIDs.dat", "a+");
 	if (usersfile == NULL || hwidfile == NULL ) {
@@ -473,6 +479,6 @@ int main(int argc, char **argv) {
 
 /* TEST MESSAGES 
  <type>auth</type><login>test</login><password>test</password>
- <type>reg</type><login>test</login><password>test</password><mail>test@test.com</mail>
+ <type>reg</type><login>test</login><password>test</password><mail>test@test.com</mail><hwid>test</hwid>
  <type>gameauth</type><login>test</login><password>test</password><md5>test</md5><hwid>test</hwid>
  */
