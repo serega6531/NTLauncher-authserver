@@ -342,6 +342,13 @@ void processAnswer(char *result, char *message) {
 bool processConsoleMessage(char *message){
 	char command[strlen(message)], arg[strlen(message)], buf[100];
 
+	if(strcmp(message, "stop\n") == 0){
+		sendMessage("stop\n");
+		puts("Waiting for server stopping...");
+		sleep(3);
+		stop();
+		return true;
+	}
 	if(sscanf(message, "%s %s", command, arg) < 2)
 		return false;
 	if(strcmp(command, "banuser") == 0){
@@ -359,12 +366,6 @@ bool processConsoleMessage(char *message){
 		snprintf(buf, sizeof(buf), "<hwid>%s</hwid>", arg);
 		fputs(buf, hwidfile);
 		puts("Banned!");
-		return true;
-	} else if(strcmp(command, "stop") == 0){
-		sendMessage("stop\n");
-		puts("Waiting for server stopping...");
-		sleep(3);
-		stop();
 		return true;
 	}
 	return false;
