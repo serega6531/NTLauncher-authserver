@@ -1,6 +1,6 @@
 /* C server part of NTLauncher
  * Written by serega6531
- * From github.com/serega6531/NTLauncher-authserver
+ * Page on GitHub - github.com/serega6531/NTLauncher-authserver
  * Thanks HoShiMin and Asmodai for helping */
 
 #include <stdio.h>
@@ -15,15 +15,7 @@
 #include <signal.h>
 #include <sys/stat.h>
 #include "utlist.h"
-
-   /* НАСТРОЙКИ */
-#define SERVER_PORT 65533                     //Порт, на котором запущен сервер
-#define MAXTHREADS 15                         //Максимальное количество одновременно обрабатываемых игроков
-#define CLIENT_VERSION 0                      //Версия клиента
-#define CLIENT_MD5 "58e8c6b9374e0d4ff71df7ba3ba136cc"    //MD5 хеш клиента
-#define LAUNCH_STRING "cd server && java -Xms512M -Xmx512M -jar craftbukkit.jar"    //Строка, запускающая сервер. Обязателен переход в папку сервера.
-#define TIME_TO_ENTER 90                     //Время на вход в игру (в секундах)
-#define HWIDS_DIR "PlayersHWIDs/"            //Папка с HWID'ами игроков. Не менять без необходимости.
+#include "settings.h"
 
 #define BUFSIZE 8192
 #define READ 0
@@ -233,6 +225,10 @@ bool hasHWIDInBase(char *player, char *hwid) {
 
 	snprintf(buf, sizeof(buf), "%s%s_HWID.dat", HWIDS_DIR, player);
 	FILE * file = fopen(buf, "r");
+	if (file == NULL ) {
+		perror("Opening hwid file");
+		return false;
+	}
 	while (fgets(buf, sizeof(buf), file) != NULL ) {
 		if (strcmp(buf, hwid) == 0) {
 			fclose(file);
@@ -294,6 +290,23 @@ void removePlayer(char *player) {
 	sendMessage(message);
 }
 
+/* Сравнивает хеш игрока с правильным хешем */
+
+bool cmpHash(char *str) {
+	char server[strlen(CLIENT_HASH) + 2], salt[2], nserver[strlen(CLIENT_HASH)];
+
+	strcpy(server, CLIENT_HASH);
+	memmove(salt, str, 2);
+	strcut(str, 2, strlen(str) - 2);
+	strcat(server, salt);
+	server[34] = '\0';
+	hash(server, nserver);
+	if (strcmp(nserver, str) == 0)
+		return true;
+	else
+		return false;
+}
+
 /* Главная функция обвязки. Работает с сообщением клиента message и записывает результат в result */
 
 void processAnswer(char *result, char *message) {
@@ -303,7 +316,7 @@ void processAnswer(char *result, char *message) {
 			"=============================================================\nClient send message.\nRaw message: %s\n",
 			message);
 	if (isXML(message) && hasXMLKey(message, "type")
-			&& hasXMLKey(message, "login") && hasXMLKey(message, "password")) {  // Если есть необходимые поля...
+			&& hasXMLKey(message, "login") && hasXMLKey(message, "password")) { // Если есть необходимые поля...
 		int mlen = strlen(message) - 1;
 		char type[mlen], login[mlen], password[mlen];
 		getXMLData(message, "type", type, mlen - 1);      // ...Получаем их
@@ -312,32 +325,32 @@ void processAnswer(char *result, char *message) {
 		sprintf(print, "%sType: %s\nLogin: %s\nPassword: %s\n", print, type,
 				login, password);
 		if (strcmp(type, "auth") == 0) {             // Если тип - авторизация
-			if (haveLoginAndPassword(login, password)) {     // Если игрок есть есть в базе
+			if (haveLoginAndPassword(login, password)) { // Если игрок есть есть в базе
 				sprintf(result,
 						"<response>success</response><version>%d</versions>",
 						CLIENT_VERSION);
 			} else {
 				strcpy(result, "<response>bad login</response>");
 			}
-		} else if (strcmp(type, "reg") == 0 && hasXMLKey(message, "mail")   // Если тип - регистрация
-				&& hasXMLKey(message, "hwid")) {                            // И есть необходимые поля для регистрации
+		} else if (strcmp(type, "reg") == 0 && hasXMLKey(message, "mail") // Если тип - регистрация
+				&& hasXMLKey(message, "hwid")) { // И есть необходимые поля для регистрации
 			bool res = true;
 			char mail[mlen], fmail[mlen], flogin[mlen], hwid[mlen], buf[75];
 
-			getXMLData(message, "mail", mail, mlen - 1);              // Получаем данные
+			getXMLData(message, "mail", mail, mlen - 1);      // Получаем данные
 			getXMLData(message, "hwid", hwid, mlen - 1);
 
 			sprintf(print, "%sMail: %s\nHWID: %s\n", print, mail, hwid);
 
-			if (isHWIDBanned(hwid)) {                                   // Если HWID забанен...
-				strcpy(result, "<response>banned</response>");          // ...отправляем сообщение об этом
+			if (isHWIDBanned(hwid)) {                    // Если HWID забанен...
+				strcpy(result, "<response>banned</response>"); // ...отправляем сообщение об этом
 				res = false;
 			} else {
-				addHWIDToList(login, hwid);                            // Иначе добавляем HWID в список
+				addHWIDToList(login, hwid);     // Иначе добавляем HWID в список
 			}
 			if (res) {
 				fseek(usersfile, 0, SEEK_SET);
-				while (fgets(buf, sizeof(buf), usersfile) != NULL ) {          // Ищем игрока с таким логином или почтой в базе
+				while (fgets(buf, sizeof(buf), usersfile) != NULL ) { // Ищем игрока с таким логином или почтой в базе
 					getXMLData(buf, "login", flogin, mlen - 1);
 					getXMLData(buf, "mail", fmail, mlen - 1);
 					if (strcmp(login, flogin) == 0
@@ -355,27 +368,27 @@ void processAnswer(char *result, char *message) {
 				fputs(buf, usersfile);
 				strcpy(result, "<response>success</response>");
 			}
-		} else if (strcmp(type, "gameauth") == 0 && hasXMLKey(message, "md5")  // Если тип - игровая авторизация
-				&& hasXMLKey(message, "hwid")) {                               // И есть нужные поля
-			char md5[mlen], hwid[mlen];
+		} else if (strcmp(type, "gameauth") == 0 && hasXMLKey(message, "md5") // Если тип - игровая авторизация
+				&& hasXMLKey(message, "hwid")) {           // И есть нужные поля
+			char hash[mlen], hwid[mlen];
 			bool res = true;
 
-			getXMLData(message, "md5", md5, mlen - 1);                         // Получаем данные
+			getXMLData(message, "md5", hash, mlen - 1);       // Получаем данные
 			getXMLData(message, "hwid", hwid, mlen - 1);
-			sprintf(print, "%sMD5: %s\nHWID: %s\n", print, md5, hwid);
+			sprintf(print, "%sHash: %s\nHWID: %s\n", print, hash, hwid);
 
-			if (!isHWIDBanned(hwid)) {                                        // Если HWID не забанен
-				if (!hasHWIDInBase(login, hwid))                              // И его нет в базе HWID'ов игрока
-					addHWIDToList(login, hwid);                               // Добавляем
+			if (!isHWIDBanned(hwid)) {                   // Если HWID не забанен
+				if (!hasHWIDInBase(login, hwid)) // И его нет в базе HWID'ов игрока
+					addHWIDToList(login, hwid);                     // Добавляем
 			} else {
-				strcpy(result, "<response>banned</response>");                // Если HWID забанен
+				strcpy(result, "<response>banned</response>"); // Если HWID забанен
 				res = false;
 			}
-			if (!res || haveLoginAndPassword(login, password)) {              // Если логин и пароль верные
-				if (strcmp(md5, CLIENT_MD5) == 0) {                           // И md5 совпадает
-					addPlayer(login);                                         // Добавляем игрока в вайтлист
+			if (!res || haveLoginAndPassword(login, password)) { // Если логин и пароль верные
+				if (cmpHash(hash)) {                          // И хеш совпадает
+					addPlayer(login);             // Добавляем игрока в вайтлист
 				} else {
-					strcpy(result, "<response>bad checksum</response>");      // Иначе отправляем сообщение об ошибке
+					strcpy(result, "<response>bad checksum</response>"); // Иначе отправляем сообщение об ошибке
 					res = false;
 				}
 				if (res)
@@ -405,14 +418,14 @@ bool processConsoleMessage(char *message) {
 		stop();
 		return true;
 	}
-	if (sscanf(message, "%s %s", command, arg) < 2)   // Если команда составлена неверно
+	if (sscanf(message, "%s %s", command, arg) < 2) // Если команда составлена неверно
 		return false;                                 // Выходим
 
 	if (strcmp(command, "banuser") == 0) {            // Если команда - banuser
 		snprintf(buf, sizeof(buf), "%s%s_HWID.dat", HWIDS_DIR, arg);
 		FILE * file = fopen(buf, "r");
 		if (file != NULL )
-			while (fgets(buf, sizeof(buf), file) != NULL ) {    // Баним все HWID'ы из файла пользователя
+			while (fgets(buf, sizeof(buf), file) != NULL ) { // Баним все HWID'ы из файла пользователя
 				printf("Banned HWID %s\n", buf);
 				snprintf(buf2, sizeof(buf2),
 						"<hwid>%s</hwid><player>%s</player>", buf, arg);
@@ -420,9 +433,9 @@ bool processConsoleMessage(char *message) {
 				fclose(file);
 			}
 		return true;
-	} else if (strcmp(command, "banhwid") == 0) {        // Если команда - banhwid
+	} else if (strcmp(command, "banhwid") == 0) {      // Если команда - banhwid
 		snprintf(buf, sizeof(buf), "<hwid>%s</hwid>", arg);
-		fputs(buf, hwidfile);                            // Записываем его в список забаненных
+		fputs(buf, hwidfile);              // Записываем его в список забаненных
 		puts("Banned!");
 		return true;
 	}
@@ -522,22 +535,22 @@ int main(int argc, char **argv) {
 	}
 
 	puts("Launching minecraft server...");
-	if (popen2(LAUNCH_STRING, &serverpipe[WRITE], &serverpipe[READ]) <= 0) {   // Запускаем сервер, устанавливаем ввод и вывод на ячейки массива
-		puts("Server launch error.");                                          // Не получилось? Выключаем обвязку.
+	if (popen2(LAUNCH_STRING, &serverpipe[WRITE], &serverpipe[READ]) <= 0) { // Запускаем сервер, устанавливаем ввод и вывод на ячейки массива
+		puts("Server launch error.");       // Не получилось? Выключаем обвязку.
 		stop();
 	}
-	if (pthread_create(&mcthread, NULL, (void *) &f01, NULL ) != 0) {          // Запускаем поток, слушающий сообщения с сервера
-		puts("thread creating error");                                         // или выключаем обвязку
+	if (pthread_create(&mcthread, NULL, (void *) &f01, NULL ) != 0) { // Запускаем поток, слушающий сообщения с сервера
+		puts("thread creating error");                  // или выключаем обвязку
 		stop();
 	}
 
 	puts("Creating socket...");
-	if ((lsock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {            // Запускаем сокет
-		puts("Socket creating error");                              // Думаю, вы уже поняли, что тут
+	if ((lsock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {      // Запускаем сокет
+		puts("Socket creating error");          // Думаю, вы уже поняли, что тут
 		stop();
 	}
 
-	if (setsockopt(lsock, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0) {   // Устанавливаем параметры сокета
+	if (setsockopt(lsock, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0) { // Устанавливаем параметры сокета
 		puts("setsockopt error");
 		stop();
 	}
@@ -557,20 +570,20 @@ int main(int argc, char **argv) {
 		stop();
 	}
 
-	puts("Done!\nWaiting from connections...");
+	puts("Done!\nWaiting for connections...");
 
-	if (pthread_create(&sockthread, NULL, (void *) &f02, NULL ) != 0) {    // Запускаем поток, управляющий подключениями клиентов
+	if (pthread_create(&sockthread, NULL, (void *) &f02, NULL ) != 0) { // Запускаем поток, управляющий подключениями клиентов
 		puts("thread creating error");
 		stop();
 	}
 
-	if (pthread_create(&removethread, NULL, (void *) &f03, NULL ) != 0) {   // Запускаем поток, удаляющий игроков из вайтлиста
+	if (pthread_create(&removethread, NULL, (void *) &f03, NULL ) != 0) { // Запускаем поток, удаляющий игроков из вайтлиста
 		puts("thread creating error");
 		stop();
 	}
 
-	while (fgets(line, sizeof(line), stdin) != NULL ) {     // Слушаем пользовательский ввод
-		if (!processConsoleMessage(line))                   // Если сообщение - не системное
+	while (fgets(line, sizeof(line), stdin) != NULL ) { // Слушаем пользовательский ввод
+		if (!processConsoleMessage(line))       // Если сообщение - не системное
 			sendMessage(line);                              // Отправляем его
 	}
 
@@ -581,5 +594,5 @@ int main(int argc, char **argv) {
 /* ТЕСТОВЫЕ СООБЩЕНИЯ
  <type>auth</type><login>test</login><password>test</password>
  <type>reg</type><login>test</login><password>test</password><mail>test@test.com</mail><hwid>test</hwid>
- <type>gameauth</type><login>test</login><password>test</password><md5>test</md5><hwid>test</hwid>
+ <type>gameauth</type><login>test</login><password>test</password><md5>a036b3be41c6becd1c859c7e58e4da3d85</md5><hwid>test</hwid>
  */
