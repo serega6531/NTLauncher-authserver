@@ -76,6 +76,7 @@ void hash(char *string, char *result) {
 	SHA384_Init(&handler);
 	SHA384_Update(&handler, string, strlen(string));
 	SHA384_Final(hash, &handler);
+	memset(result, '\0', strlen(result));
 	for (i = 0; i < SHA384_DIGEST_LENGTH; i++) {
 		sprintf(result, "%s%02x", result, hash[i]);
 	};
@@ -93,6 +94,7 @@ void hash(char *string, char *result) {
 	SHA512_Init(&handler);
 	SHA512_Update(&handler, string, strlen(string));
 	SHA512_Final(hash, &handler);
+	memset(result, '\0', strlen(result));
 	for (i = 0; i < SHA512_DIGEST_LENGTH; i++) {
 		sprintf(result, "%s%02x", result, hash[i]);
 	};

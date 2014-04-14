@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/stat.h>
+#include <errno.h>
 #include "utlist.h"
 #include "settings.h"
 
@@ -524,9 +525,14 @@ int main(int argc, char **argv) {
 
 	puts("Starting server...");
 
+	if(unlink(PATH_TO_WHITELIST) == -1 && errno != ENOENT){
+		puts("[WARNING]Can't remove whitelist file");
+	}
+
 	if (stat(HWIDS_DIR, &st) == -1) {   // если нет папки с HWID'ами...
 		mkdir(HWIDS_DIR, 0700);         // ...создаем её
 	}
+
 	usersfile = fopen("Base.dat", "a+");           // Открываем
 	hwidfile = fopen("BannedHWIDs.dat", "a+");     // файлы
 	if (usersfile == NULL || hwidfile == NULL ) {  // Если ошибка -
@@ -539,6 +545,7 @@ int main(int argc, char **argv) {
 		puts("Server launch error.");       // Не получилось? Выключаем обвязку.
 		stop();
 	}
+
 	if (pthread_create(&mcthread, NULL, (void *) &f01, NULL ) != 0) { // Запускаем поток, слушающий сообщения с сервера
 		puts("thread creating error");                  // или выключаем обвязку
 		stop();
