@@ -1,5 +1,8 @@
 #include "hash.h"
 
+#define DB_FILE 0x1
+#define DB_MYSQL 0x2
+
 /* НАСТРОЙКИ */
 #define SERVER_PORT 65533                     //Порт, на котором запущен сервер
 #define MAXTHREADS 15                         //Максимальное количество одновременно обрабатываемых игроков
@@ -8,5 +11,20 @@
 #define LAUNCH_STRING "cd server && java -Xms512M -Xmx512M -jar craftbukkit.jar"    //Строка, запускающая сервер. Обязателен переход в папку сервера.
 #define PATH_TO_WHITELIST "server/white-list.txt"
 #define TIME_TO_ENTER 90                     //Время на вход в игру (в секундах)
-#define HWIDS_DIR "PlayersHWIDs/"            //Папка с HWID'ами игроков. Не менять без необходимости.
 #define HASH_ALGO HASH_MD5                   //Алгоритм хеширования
+#define DATABASE DB_MYSQL
+
+#if DATABASE == DB_FILE
+#define HWIDS_DIR "PlayersHWIDs/"            //Папка с HWID'ами игроков. Не менять без необходимости.
+#endif
+
+#if DATABASE == DB_MYSQL
+
+/* Настройки MYSQL */
+#define MYSQL_HOST "127.0.0.1"
+#define MYSQL_USER "authserver"
+#define MYSQL_PASS "authserverpass"
+#define MYSQL_PORT 3306
+#define MYSQL_DB "authserver"
+
+#endif

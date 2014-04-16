@@ -18,6 +18,10 @@
 #include "utlist.h"
 #include "settings.h"
 
+#if DATABASE == DB_MYSQL
+#include <mysql.h>
+#endif
+
 #define BUFSIZE 8192
 #define READ 0
 #define WRITE 1
@@ -32,7 +36,11 @@ typedef struct el {
 	struct el *next;
 } el;
 
+#if DATABASE == DB_FILE
 FILE * usersfile, *hwidfile;
+#elif DATABASE == DB_MYSQL
+MYSQL * mysql;
+#endif
 int lsock = 0, serverpipe[2];
 el *head = NULL;
 
@@ -171,8 +179,12 @@ void getXMLData(char *string, char *key, char *result, int maxlen) {
 
 void stop() {
 	puts("Stopping server...");
+#if DATABASE == DB_FILE
 	fclose(usersfile);
 	fclose(hwidfile);
+#elif DATABASE == DB_MYSQL
+	mysql_close(mysql);
+#endif
 	close(serverpipe[0]);
 	close(serverpipe[1]);
 	close(lsock);
@@ -192,6 +204,7 @@ void exitListener(int sig) {
 /* Ищет аккаут в файле игроков */
 
 bool haveLoginAndPassword(char *login, char *password) {
+#if DATABASE == DB_FILE
 	char buf[128], buf1[64], buf2[64];
 
 	fseek(usersfile, 0, SEEK_SET);
@@ -199,14 +212,29 @@ bool haveLoginAndPassword(char *login, char *password) {
 		getXMLData(buf, "login", buf1, 63);
 		getXMLData(buf, "password", buf2, 63);
 		if (strcmp(buf1, login) == 0 && strcmp(buf2, password) == 0)
-			return true;
+		return true;
 	}
+#elif DATABASE == DB_MYSQL
+	char buf[150];
+	MYSQL_RES * result;
+	bool ret;
+
+	sprintf(buf, "SELECT * FROM `users` WHERE `login`='%s' AND `password`='%s'",
+			login, password);
+	mysql_query(mysql, buf);
+	result = mysql_store_result(mysql);
+	if (mysql_num_rows(result) > 0)
+		ret = true;
+	mysql_free_result(result);
+	return ret;
+#endif
 	return false;
 }
 
 /* Проверяет, забанен ли HWID игрока */
 
 bool isHWIDBanned(char *hwid) {
+#if DATABASE == DB_FILE
 	char buf[100];
 	char fhwid[50];
 
@@ -214,14 +242,28 @@ bool isHWIDBanned(char *hwid) {
 	while (fgets(buf, sizeof(buf), hwidfile) != NULL ) {
 		getXMLData(buf, "hwid", fhwid, 49);
 		if (strcmp(fhwid, hwid) == 0)
-			return true;
+		return true;
 	}
+#elif DATABASE == DB_MYSQL
+	char buf[150];
+	MYSQL_RES * result;
+	bool ret;
+
+	sprintf(buf, "SELECT * FROM `bannedhwids` WHERE `hwid`='%s'", hwid);
+	mysql_query(mysql, buf);
+	result = mysql_store_result(mysql);
+	if (mysql_num_rows(result) > 0)
+		ret = true;
+	mysql_free_result(result);
+	return ret;
+#endif
 	return false;
 }
 
 /* Проверяет, находится ли HWID в списке HWID'ов игрока player */
 
 bool hasHWIDInBase(char *player, char *hwid) {
+#if DATABASE == DB_FILE
 	char buf[40];
 
 	snprintf(buf, sizeof(buf), "%s%s_HWID.dat", HWIDS_DIR, player);
@@ -237,12 +279,27 @@ bool hasHWIDInBase(char *player, char *hwid) {
 		}
 	}
 	fclose(file);
+#elif DATABASE == DB_MYSQL
+	char buf[150];
+	MYSQL_RES * result;
+	bool ret = false;
+
+	sprintf(buf, "SELECT * FROM `hwids` WHERE `hwid`='%s' AND `login`='%s'",
+			hwid, player);
+	mysql_query(mysql, buf);
+	result = mysql_store_result(mysql);
+	if (mysql_num_rows(result) > 0)
+		ret = true;
+	mysql_free_result(result);
+	return ret;
+#endif
 	return false;
 }
 
 /* Добавляет HWID в файл HWID'ов игрока player */
 
 void addHWIDToList(char *player, char *hwid) {
+#if DATABASE == DB_FILE
 	char buf[75];
 
 	snprintf(buf, sizeof(buf), "%s%s_HWID.dat", HWIDS_DIR, player);
@@ -250,6 +307,12 @@ void addHWIDToList(char *player, char *hwid) {
 	sprintf(buf, "%s\n", hwid);
 	fputs(hwid, file);
 	fclose(file);
+#elif DATABASE == DB_MYSQL
+	char buf[150];
+
+	sprintf(buf, "INSERT INTO `hwids` VALUES ('%s','%s')", hwid, player);
+	mysql_query(mysql, buf);
+#endif
 }
 
 /* Добавляет игрока в список на удаление из вайтлиста. Удаляет через TIME_TO_ENTER секунд. */
@@ -311,7 +374,7 @@ bool cmpHash(char *str) {
 /* Главная функция обвязки. Работает с сообщением клиента message и записывает результат в result */
 
 void processAnswer(char *result, char *message) {
-	char print[BUFSIZE];
+	char print[4096];
 
 	sprintf(print,
 			"=============================================================\nClient send message.\nRaw message: %s\n",
@@ -336,7 +399,10 @@ void processAnswer(char *result, char *message) {
 		} else if (strcmp(type, "reg") == 0 && hasXMLKey(message, "mail") // Если тип - регистрация
 				&& hasXMLKey(message, "hwid")) { // И есть необходимые поля для регистрации
 			bool res = true;
-			char mail[mlen], fmail[mlen], flogin[mlen], hwid[mlen], buf[75];
+			char hwid[mlen], mail[mlen], buf[75];
+#if DATABASE == DB_FILE
+			char fmail[mlen], flogin[mlen];
+#endif
 
 			getXMLData(message, "mail", mail, mlen - 1);      // Получаем данные
 			getXMLData(message, "hwid", hwid, mlen - 1);
@@ -350,6 +416,7 @@ void processAnswer(char *result, char *message) {
 				addHWIDToList(login, hwid);     // Иначе добавляем HWID в список
 			}
 			if (res) {
+#if DATABASE == DB_FILE
 				fseek(usersfile, 0, SEEK_SET);
 				while (fgets(buf, sizeof(buf), usersfile) != NULL ) { // Ищем игрока с таким логином или почтой в базе
 					getXMLData(buf, "login", flogin, mlen - 1);
@@ -361,12 +428,33 @@ void processAnswer(char *result, char *message) {
 						break;
 					}
 				}
+#elif DATABASE == DB_MYSQL
+				char buf[150];
+				MYSQL_RES * msresult;
+
+				sprintf(buf,
+						"SELECT * FROM `users` WHERE `login`='%s' OR `mail`='%s'",
+						login, mail);
+				mysql_query(mysql, buf);
+				msresult = mysql_store_result(mysql);
+				if (mysql_num_rows(msresult) > 0){
+					strcpy(result, "<response>already exists</response>");
+					res = false;
+				}
+				mysql_free_result(msresult);
+#endif
 			}
 			if (res) {                     // Если нет ошибок
-				sprintf(buf,
-						"<login>%s</login><password>%s</password><mail>%s</mail>\n",
+#if DATABASE == DB_FILE
+			sprintf(buf,
+					"<login>%s</login><password>%s</password><mail>%s</mail>\n",
+					login, password, mail);
+			fputs(buf, usersfile);
+#elif DATABASE == DB_MYSQL
+				sprintf(buf, "INSERT INTO `users` VALUES ('%s','%s','%s')",
 						login, password, mail);
-				fputs(buf, usersfile);
+				mysql_query(mysql, buf);
+#endif
 				strcpy(result, "<response>success</response>");
 			}
 		} else if (strcmp(type, "gameauth") == 0 && hasXMLKey(message, "md5") // Если тип - игровая авторизация
@@ -400,17 +488,18 @@ void processAnswer(char *result, char *message) {
 			strcpy(result, "<response>bad login</response>");
 	} else
 		strcpy(result, "<response>bad login</response>");
-	sprintf(print,
-			"%sResponse: %s\n=============================================================\n",
+	printf("%sResponse: %s\n=============================================================\n",
 			print, result);
-	puts(print);
 }
 
 /* Функция, обрабатывающая консольное сообщение пользователя.
  * Возвращаемое значение - нужно ли отправлять сообщение серверу. */
 
 bool processConsoleMessage(char *message) {
-	char command[strlen(message)], arg[strlen(message)], buf[50], buf2[100];
+	char command[strlen(message)], arg[strlen(message)], buf[150];
+#if DATABASE == DB_FILE
+	char buf2[100];
+#endif
 
 	if (strcmp(message, "stop\n") == 0) {     // Если сообщение - stop
 		sendMessage("stop\n");
@@ -423,23 +512,61 @@ bool processConsoleMessage(char *message) {
 		return false;                                 // Выходим
 
 	if (strcmp(command, "banuser") == 0) {            // Если команда - banuser
-		snprintf(buf, sizeof(buf), "%s%s_HWID.dat", HWIDS_DIR, arg);
-		FILE * file = fopen(buf, "r");
-		if (file != NULL )
-			while (fgets(buf, sizeof(buf), file) != NULL ) { // Баним все HWID'ы из файла пользователя
-				printf("Banned HWID %s\n", buf);
-				snprintf(buf2, sizeof(buf2),
-						"<hwid>%s</hwid><player>%s</player>", buf, arg);
-				fputs(buf2, hwidfile);
+#if DATABASE == DB_FILE
+			snprintf(buf, sizeof(buf), "%s%s_HWID.dat", HWIDS_DIR, arg);
+			FILE * file = fopen(buf, "r");
+			if (file != NULL ) {
+				while (fgets(buf, sizeof(buf), file) != NULL ) { // Баним все HWID'ы из файла пользователя
+					printf("Banned HWID %s\n", buf);
+					snprintf(buf2, sizeof(buf2),
+							"<hwid>%s</hwid><player>%s</player>\n", buf, arg);
+					fputs(buf2, hwidfile);
+				}
 				fclose(file);
+			} else {
+				puts("No user's HWIDs in database!");
 			}
+#elif DATABASE == DB_MYSQL
+		MYSQL_RES * msres;
+		MYSQL_ROW msrow;
+
+		sprintf(buf, "SELECT `hwid` FROM `hwids` WHERE `login`='%s'", arg);
+		mysql_query(mysql, buf);
+		msres = mysql_store_result(mysql);
+
+		while (!mysql_eof(msres)) {
+			msrow = mysql_fetch_row(msres);
+			sprintf(buf, "INSERT INTO `bannedhwids` VALUES ('%s','%s')", arg,
+					msrow[0]);
+			mysql_query(mysql, buf);
+			printf("Banned hwid %s", msrow[0]);
+		}
+#endif
 		return true;
 	} else if (strcmp(command, "banhwid") == 0) {      // Если команда - banhwid
-		snprintf(buf, sizeof(buf), "<hwid>%s</hwid>", arg);
-		fputs(buf, hwidfile);              // Записываем его в список забаненных
+#if DATABASE == DB_FILE
+			snprintf(buf, sizeof(buf), "<hwid>%s</hwid>\n", arg);
+			fputs(buf, hwidfile);        // Записываем его в список забаненных
+#elif DATABASE == DB_MYSQL
+		sprintf(buf, "INSERT INTO `bannedhwids` VALUES ('__BANNEDUSER__','%s')", arg);
+		mysql_query(mysql, buf);
+#endif
 		puts("Banned!");
 		return true;
 	}
+#if DATABASE == DB_MYSQL
+	else if (strcmp(command, "unbanuser") == 0) {    // Если команда - unbanuser
+		sprintf(buf, "DELETE FROM `bannedhwids` WHERE `login`='%s'", arg);
+		mysql_query(mysql, buf);
+		puts("Unbanned!");
+		return true;
+	} else if (strcmp(command, "unbanhwid") == 0) {  // Если команда - unbanhwid
+		sprintf(buf, "DELETE FROM `bannedhwids` WHERE `hwid`='%s'", arg);
+		mysql_query(mysql, buf);
+		puts("Unbanned!");
+		return true;
+	}
+#endif
 	return false;
 }
 
@@ -519,26 +646,40 @@ int main(int argc, char **argv) {
 	struct sockaddr_in sa;
 	pthread_t mcthread = 0, sockthread = 0, removethread = 0;
 	char line[150] = { '\0' };
-	struct stat st = { 0 };
 
 	signal(SIGINT, exitListener); // Ставим слушатель Ctrl + C на функцию
 
 	puts("Starting server...");
 
-	if(unlink(PATH_TO_WHITELIST) == -1 && errno != ENOENT){
+	if (unlink(PATH_TO_WHITELIST) == -1 && errno != ENOENT) {
 		puts("[WARNING]Can't remove whitelist file");
 	}
 
+#if DATABASE == DB_FILE
+	struct stat st = {0};
+
 	if (stat(HWIDS_DIR, &st) == -1) {   // если нет папки с HWID'ами...
-		mkdir(HWIDS_DIR, 0700);         // ...создаем её
+		mkdir(HWIDS_DIR, 0700);// ...создаем её
 	}
 
 	usersfile = fopen("Base.dat", "a+");           // Открываем
-	hwidfile = fopen("BannedHWIDs.dat", "a+");     // файлы
+	hwidfile = fopen("BannedHWIDs.dat", "a+");// файлы
 	if (usersfile == NULL || hwidfile == NULL ) {  // Если ошибка -
-		puts("Error opening file");                // Выводим её
-		return -1;                                 // и закрываем программу
+		puts("Error opening file");// Выводим её
+		return -1;// и закрываем программу
 	}
+#elif DATABASE == DB_MYSQL
+	mysql = mysql_init(NULL );
+	if (mysql == NULL
+			|| !mysql_real_connect(mysql, MYSQL_HOST, MYSQL_USER, MYSQL_PASS,
+					MYSQL_DB, MYSQL_PORT, NULL, 0)) {
+		fprintf(stderr, "Error connecting MySQL: %s\n", mysql_error(mysql));
+		return -1;
+	}
+	mysql_query(mysql, "CREATE TABLE IF NOT EXISTS bannedhwids (login TEXT(20), hwid TEXT(20))");
+	mysql_query(mysql, "CREATE TABLE IF NOT EXISTS hwids (login TEXT(20), hwid TEXT(20))");
+	mysql_query(mysql, "CREATE TABLE IF NOT EXISTS users (login TEXT(20), password TEXT(40), mail TEXT(80))");
+#endif
 
 	puts("Launching minecraft server...");
 	if (popen2(LAUNCH_STRING, &serverpipe[WRITE], &serverpipe[READ]) <= 0) { // Запускаем сервер, устанавливаем ввод и вывод на ячейки массива
@@ -599,7 +740,7 @@ int main(int argc, char **argv) {
 }
 
 /* ТЕСТОВЫЕ СООБЩЕНИЯ
- <type>auth</type><login>test</login><password>test</password>
- <type>reg</type><login>test</login><password>test</password><mail>test@test.com</mail><hwid>test</hwid>
- <type>gameauth</type><login>test</login><password>test</password><md5>a036b3be41c6becd1c859c7e58e4da3d85</md5><hwid>test</hwid>
+ <type>auth</type><login>test</login><password>A94A8FE5CCB19BA61C4C0873D391E987982FBBD3</password>
+ <type>reg</type><login>test1</login><password>A94A8FE5CCB19BA61C4C0873D391E987982FBBD3</password><mail>test1@test.com</mail><hwid>test1</hwid>
+ <type>gameauth</type><login>test</login><password>A94A8FE5CCB19BA61C4C0873D391E987982FBBD3</password><md5>a036b3be41c6becd1c859c7e58e4da3d85</md5><hwid>test</hwid>
  */
