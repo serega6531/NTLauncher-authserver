@@ -180,14 +180,14 @@ void getXMLData(char *string, char *key, char *result, int maxlen) {
 void stop() {
 	puts("Stopping server...");
 #if DATABASE == DB_FILE
-	fclose(usersfile);
-	fclose(hwidfile);
+	fclose(usersfile);     // Закрываем
+	fclose(hwidfile);// файлы
 #elif DATABASE == DB_MYSQL
-	mysql_close(mysql);
+	mysql_close(mysql);   // соединения
 #endif
-	close(serverpipe[0]);
+	close(serverpipe[0]); // трубы
 	close(serverpipe[1]);
-	close(lsock);
+	close(lsock);         // сокеты
 
 	exit(0);
 }
@@ -197,7 +197,7 @@ void stop() {
 void exitListener(int sig) {
 	signal(sig, SIG_IGN );
 	sendMessage("stop\n");
-	sleep(1);
+	sleep(2);    // Ждём остановки сервера. Замените число на своё (в секундах).
 	stop();
 }
 
@@ -208,7 +208,7 @@ bool haveLoginAndPassword(char *login, char *password) {
 	char buf[128], buf1[64], buf2[64];
 
 	fseek(usersfile, 0, SEEK_SET);
-	while (fgets(buf, sizeof(buf), usersfile) != NULL ) {
+	while (fgets(buf, sizeof(buf), usersfile) != NULL ) { // Проходимся циклом по строкам
 		getXMLData(buf, "login", buf1, 63);
 		getXMLData(buf, "password", buf2, 63);
 		if (strcmp(buf1, login) == 0 && strcmp(buf2, password) == 0)
@@ -221,9 +221,9 @@ bool haveLoginAndPassword(char *login, char *password) {
 
 	sprintf(buf, "SELECT * FROM `users` WHERE `login`='%s' AND `password`='%s'",
 			login, password);
-	mysql_query(mysql, buf);
+	mysql_query(mysql, buf);            // Отправляем запрос
 	result = mysql_store_result(mysql);
-	if (mysql_num_rows(result) > 0)
+	if (mysql_num_rows(result) > 0)      // Если есть такие пользователи
 		ret = true;
 	mysql_free_result(result);
 	return ret;
@@ -239,7 +239,7 @@ bool isHWIDBanned(char *hwid) {
 	char fhwid[50];
 
 	fseek(hwidfile, 0, SEEK_SET);
-	while (fgets(buf, sizeof(buf), hwidfile) != NULL ) {
+	while (fgets(buf, sizeof(buf), hwidfile) != NULL ) { // Проходимся циклом по строкам
 		getXMLData(buf, "hwid", fhwid, 49);
 		if (strcmp(fhwid, hwid) == 0)
 		return true;
@@ -252,7 +252,7 @@ bool isHWIDBanned(char *hwid) {
 	sprintf(buf, "SELECT * FROM `bannedhwids` WHERE `hwid`='%s'", hwid);
 	mysql_query(mysql, buf);
 	result = mysql_store_result(mysql);
-	if (mysql_num_rows(result) > 0)
+	if (mysql_num_rows(result) > 0)           // Если HWID в списке забаненных
 		ret = true;
 	mysql_free_result(result);
 	return ret;
@@ -268,11 +268,11 @@ bool hasHWIDInBase(char *player, char *hwid) {
 
 	snprintf(buf, sizeof(buf), "%s%s_HWID.dat", HWIDS_DIR, player);
 	FILE * file = fopen(buf, "r");
-	if (file == NULL ) {
+	if (file == NULL ) {         // Если вдруг файл удалён
 		perror("Opening hwid file");
 		return false;
 	}
-	while (fgets(buf, sizeof(buf), file) != NULL ) {
+	while (fgets(buf, sizeof(buf), file) != NULL ) {  // Цикл по строкам
 		if (strcmp(buf, hwid) == 0) {
 			fclose(file);
 			return true;
@@ -288,7 +288,7 @@ bool hasHWIDInBase(char *player, char *hwid) {
 			hwid, player);
 	mysql_query(mysql, buf);
 	result = mysql_store_result(mysql);
-	if (mysql_num_rows(result) > 0)
+	if (mysql_num_rows(result) > 0)      // Если HWID есть в базе
 		ret = true;
 	mysql_free_result(result);
 	return ret;
@@ -360,12 +360,12 @@ bool cmpHash(char *str) {
 	char server[strlen(CLIENT_HASH) + 2], salt[2], nserver[strlen(CLIENT_HASH)];
 
 	strcpy(server, CLIENT_HASH);
-	memmove(salt, str, 2);
-	strcut(str, 2, strlen(str) - 2);
-	strcat(server, salt);
+	memmove(salt, str, 2);             // Получаем соль из первых двух символов сообщения
+	strcut(str, 2, strlen(str) - 2);   // Оставляем в сообщении оставшееся
+	strcat(server, salt);              // Добавляем соль к хешу сервера
 	server[34] = '\0';
-	hash(server, nserver);
-	if (strcmp(nserver, str) == 0)
+	hash(server, nserver);             // Хешируем её
+	if (strcmp(nserver, str) == 0)     // Сравниваем с сообщением без соли
 		return true;
 	else
 		return false;
@@ -437,7 +437,7 @@ void processAnswer(char *result, char *message) {
 						login, mail);
 				mysql_query(mysql, buf);
 				msresult = mysql_store_result(mysql);
-				if (mysql_num_rows(msresult) > 0){
+				if (mysql_num_rows(msresult) > 0) {          // Если такой игрок уже есть
 					strcpy(result, "<response>already exists</response>");
 					res = false;
 				}
@@ -449,11 +449,11 @@ void processAnswer(char *result, char *message) {
 			sprintf(buf,
 					"<login>%s</login><password>%s</password><mail>%s</mail>\n",
 					login, password, mail);
-			fputs(buf, usersfile);
+			fputs(buf, usersfile);         // Записываем в файл с игроками
 #elif DATABASE == DB_MYSQL
 				sprintf(buf, "INSERT INTO `users` VALUES ('%s','%s','%s')",
 						login, password, mail);
-				mysql_query(mysql, buf);
+				mysql_query(mysql, buf);      // Отправляем запрос на добавление
 #endif
 				strcpy(result, "<response>success</response>");
 			}
@@ -488,7 +488,8 @@ void processAnswer(char *result, char *message) {
 			strcpy(result, "<response>bad login</response>");
 	} else
 		strcpy(result, "<response>bad login</response>");
-	printf("%sResponse: %s\n=============================================================\n",
+	printf(
+			"%sResponse: %s\n=============================================================\n",
 			print, result);
 }
 
@@ -532,11 +533,11 @@ bool processConsoleMessage(char *message) {
 
 		sprintf(buf, "SELECT `hwid` FROM `hwids` WHERE `login`='%s'", arg);
 		mysql_query(mysql, buf);
-		msres = mysql_store_result(mysql);
+		msres = mysql_store_result(mysql);      // Получаем HWIDы игрока
 
-		while (!mysql_eof(msres)) {
+		while (!mysql_eof(msres)) {            // Проходимся по ним циклом
 			msrow = mysql_fetch_row(msres);
-			sprintf(buf, "INSERT INTO `bannedhwids` VALUES ('%s','%s')", arg,
+			sprintf(buf, "INSERT INTO `bannedhwids` VALUES ('%s','%s')", arg,   // Баним HWID
 					msrow[0]);
 			mysql_query(mysql, buf);
 			printf("Banned hwid %s", msrow[0]);
@@ -548,13 +549,14 @@ bool processConsoleMessage(char *message) {
 			snprintf(buf, sizeof(buf), "<hwid>%s</hwid>\n", arg);
 			fputs(buf, hwidfile);        // Записываем его в список забаненных
 #elif DATABASE == DB_MYSQL
-		sprintf(buf, "INSERT INTO `bannedhwids` VALUES ('__BANNEDUSER__','%s')", arg);
+		sprintf(buf, "INSERT INTO `bannedhwids` VALUES ('__BANNEDUSER__','%s')",    //Отправляем запрос на добавление HWID'а с фейковым пользователем
+				arg);
 		mysql_query(mysql, buf);
 #endif
 		puts("Banned!");
 		return true;
 	}
-#if DATABASE == DB_MYSQL
+#if DATABASE == DB_MYSQL          // Эти команды работают только если БД - MySQL
 	else if (strcmp(command, "unbanuser") == 0) {    // Если команда - unbanuser
 		sprintf(buf, "DELETE FROM `bannedhwids` WHERE `login`='%s'", arg);
 		mysql_query(mysql, buf);
@@ -576,10 +578,10 @@ void * f00(void *data) {
 	char buf[BUFSIZE], answer[70];
 	int asock = *(int *) data, nread = 0;
 
-	while ((nread = read(asock, buf, BUFSIZE)) > 0) {
-		processAnswer(answer, buf);
-		write(asock, answer, strlen(answer));
-		shutdown(asock, 0);
+	while ((nread = read(asock, buf, BUFSIZE)) > 0) {     // Читаем сообщение
+		processAnswer(answer, buf);                       // Обрабатываем
+		write(asock, answer, strlen(answer));             // Посылаем ответ
+		shutdown(asock, 0);                               // Закрываем соединение
 	}
 	return NULL ;
 }
@@ -590,9 +592,9 @@ void *f01(void *data) {
 	char buf[BUFSIZE];
 
 	while (1) {
-		read(serverpipe[READ], buf, BUFSIZE - 1);
-		printf("[SERVER]%s", buf);
-		memset(buf, 0, strlen(buf));
+		read(serverpipe[READ], buf, BUFSIZE - 1);    // Получаем сообщения сервера
+		printf("[SERVER]%s", buf);                   // Выводим
+		memset(buf, 0, strlen(buf));                 // Очищаем буфер
 	}
 	return NULL ;
 }
@@ -604,10 +606,10 @@ void *f02(void *data) {
 	pthread_t threadid[MAXTHREADS], nthreads = 0;
 
 	while (1) {
-		if ((asock = accept(lsock, NULL, NULL )) < 0)
+		if ((asock = accept(lsock, NULL, NULL )) < 0)     // Принимаем подклчение
 			puts("accept error");
 
-		if (pthread_create(&threadid[x++], NULL, (void *) &f00, &asock) != 0)
+		if (pthread_create(&threadid[x++], NULL, (void *) &f00, &asock) != 0)    // Передаём в поток
 			puts("thread creating error");
 
 		if (nthreads++ >= MAXTHREADS)
@@ -626,7 +628,7 @@ void *f03(void *data) {
 	el *tmp;
 
 	while (1) {
-		LL_FOREACH(head, tmp)
+		LL_FOREACH(head, tmp)         // Цикл, уменьшающий время игроков до удаления из вайтлиста
 		{
 			tmp->pt.time--;
 			if (tmp->pt.time == 0) {
@@ -676,9 +678,12 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "Error connecting MySQL: %s\n", mysql_error(mysql));
 		return -1;
 	}
-	mysql_query(mysql, "CREATE TABLE IF NOT EXISTS bannedhwids (login TEXT(20), hwid TEXT(20))");
-	mysql_query(mysql, "CREATE TABLE IF NOT EXISTS hwids (login TEXT(20), hwid TEXT(20))");
-	mysql_query(mysql, "CREATE TABLE IF NOT EXISTS users (login TEXT(20), password TEXT(40), mail TEXT(80))");
+	mysql_query(mysql,
+			"CREATE TABLE IF NOT EXISTS bannedhwids (login TEXT(20), hwid TEXT(20))");
+	mysql_query(mysql,
+			"CREATE TABLE IF NOT EXISTS hwids (login TEXT(20), hwid TEXT(20))");
+	mysql_query(mysql,
+			"CREATE TABLE IF NOT EXISTS users (login TEXT(20), password TEXT(40), mail TEXT(80))");
 #endif
 
 	puts("Launching minecraft server...");
