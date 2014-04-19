@@ -41,12 +41,19 @@ FILE * usersfile, *hwidfile;
 #elif DATABASE == DB_MYSQL
 MYSQL * mysql;
 #endif
+#if AUTO_RESTART == TRUE
+pid_t serverpid = 0;
+pthread_t restartthread = 0;
+#endif
+pthread_t mcthread = 0;
 int lsock = 0, serverpipe[2];
 el *head = NULL;
 
-/* Запускает команду command в pipe, дает доступ на чтение и запись */
+void *f01(void *data);
 
-pid_t popen2(const char *command, int *infp, int *outfp) {
+/* Запускает команду в pipe, дает доступ на чтение и запись */
+
+pid_t popen2(int *infp, int *outfp) {
 	int p_stdin[2], p_stdout[2];
 	pid_t pid;
 
@@ -63,7 +70,7 @@ pid_t popen2(const char *command, int *infp, int *outfp) {
 		close(p_stdout[READ]);
 		dup2(p_stdout[WRITE], WRITE);
 
-		execl("/bin/sh", "sh", "-c", command, NULL );
+		execv(JAVA_PATH, LAUNCH_ARGS);
 		perror("execl");
 		exit(1);
 	}
@@ -112,6 +119,20 @@ int strpos(char *str, char *substr) {
 	return pos - str;
 }
 
+#if AUTO_RESTART == TRUE
+/* Проверяет, запущена ли программа с данным pid */
+bool PIDExists(pid_t pid){
+	if (kill(pid, 0) == 0) {
+	    return true;
+	} else if (errno == ESRCH) {
+	    return false;
+	} else {
+	    perror("Kill process error");
+	    return false;
+	}
+}
+#endif
+
 /* Проверяет, является ли строка синтаксически верным XML */
 
 bool isXML(char *string) {
@@ -131,6 +152,11 @@ bool isXML(char *string) {
 			c++;
 	}
 	return (a == b && a == (c * 2) && a != 0);
+}
+
+/* Преобразует число в строку */
+void itoa(int integer, char *result){
+	sprintf(result, "%d", integer);
 }
 
 /* Проверяет, имеет ли XML строка string ключ key (т.е. содержит ли она <key> и </key>) */
@@ -199,6 +225,28 @@ void exitListener(int sig) {
 	sendMessage("stop\n");
 	sleep(2);    // Ждём остановки сервера. Замените число на своё (в секундах).
 	stop();
+}
+
+/* Запускает minecraft сервер */
+void startMCServer(){
+#if AUTO_RESTART == FALSE
+	if (popen2(&serverpipe[WRITE], &serverpipe[READ]) <= 0) { // Запускаем сервер, устанавливаем ввод и вывод на ячейки массива
+#elif AUTO_RESTART == TRUE
+	if ((serverpid = popen2(&serverpipe[WRITE], &serverpipe[READ])) > 0) {
+		if(restartthread != 0){
+			pthread_kill(mcthread, SIGSTOP);
+			mcthread = 0;
+		}
+		if (pthread_create(&mcthread, NULL, (void *) &f01, NULL ) != 0) { // Запускаем поток, слушающий сообщения с сервера
+			puts("thread creating error");                  // или выключаем обвязку
+			stop();
+		}
+		printf("Server started, pid %d\n", serverpid);
+	} else {
+#endif
+		puts("Server launch error.");       // Не получилось? Выключаем обвязку.
+		stop();
+	}
 }
 
 /* Ищет аккаут в файле игроков */
@@ -363,7 +411,6 @@ bool cmpHash(char *str) {
 	memmove(salt, str, 2);             // Получаем соль из первых двух символов сообщения
 	strcut(str, 2, strlen(str) - 2);   // Оставляем в сообщении оставшееся
 	strcat(server, salt);              // Добавляем соль к хешу сервера
-	server[34] = '\0';
 	hash(server, nserver);             // Хешируем её
 	if (strcmp(nserver, str) == 0)     // Сравниваем с сообщением без соли
 		return true;
@@ -641,12 +688,24 @@ void *f03(void *data) {
 	return NULL ;
 }
 
+/* Функция потока, перезапускающего сервер при надобности */
+
+void *f04(void *data) {
+
+	while (1) {
+		if(serverpid == 0 || !PIDExists(serverpid))
+			startMCServer();
+		sleep(AUTO_RESTART_DELAY);
+	}
+	return NULL ;
+}
+
 /* Инициализация ВСЕГО */
 
 int main(int argc, char **argv) {
 	int on = 1;
 	struct sockaddr_in sa;
-	pthread_t mcthread = 0, sockthread = 0, removethread = 0;
+	pthread_t sockthread = 0, removethread = 0;
 	char line[150] = { '\0' };
 
 	signal(SIGINT, exitListener); // Ставим слушатель Ctrl + C на функцию
@@ -687,19 +746,11 @@ int main(int argc, char **argv) {
 #endif
 
 	puts("Launching minecraft server...");
-	if (popen2(LAUNCH_STRING, &serverpipe[WRITE], &serverpipe[READ]) <= 0) { // Запускаем сервер, устанавливаем ввод и вывод на ячейки массива
-		puts("Server launch error.");       // Не получилось? Выключаем обвязку.
-		stop();
-	}
-
-	if (pthread_create(&mcthread, NULL, (void *) &f01, NULL ) != 0) { // Запускаем поток, слушающий сообщения с сервера
-		puts("thread creating error");                  // или выключаем обвязку
-		stop();
-	}
+	startMCServer();
 
 	puts("Creating socket...");
 	if ((lsock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {      // Запускаем сокет
-		puts("Socket creating error");          // Думаю, вы уже поняли, что тут
+		puts("Socket creating error");
 		stop();
 	}
 
@@ -734,6 +785,13 @@ int main(int argc, char **argv) {
 		puts("thread creating error");
 		stop();
 	}
+
+#if AUTO_RESTART == TRUE
+	if (pthread_create(&restartthread, NULL, (void *) &f04, NULL ) != 0) { // Запускаем поток, проверяющий состояние сервера
+		puts("thread creating error");
+		stop();
+	}
+#endif
 
 	while (fgets(line, sizeof(line), stdin) != NULL ) { // Слушаем пользовательский ввод
 		if (!processConsoleMessage(line))       // Если сообщение - не системное
