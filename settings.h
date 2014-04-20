@@ -10,7 +10,7 @@
 #define MAXTHREADS 15                         //Максимальное количество одновременно обрабатываемых игроков
 #define CLIENT_VERSION 0                      //Версия клиента
 #define CLIENT_HASH "58e8c6b9374e0d4ff71df7ba3ba136cc"    //Хеш клиента
-#define JAVA_PATH "/usr/lib/jvm/java-8-oracle/bin/java"   //Путь до Java
+#define JAVA_PATH "/usr/bin/java"   //Путь до Java
 static char* LAUNCH_ARGS[] = {"java", "-Xms512M", "-Xmx512M", "-jar", "craftbukkit.jar"};    //Массив с параметрами запуска
 #define PATH_TO_WHITELIST "server/white-list.txt"
 #define TIME_TO_ENTER 90                     //Время на вход в игру (в секундах)

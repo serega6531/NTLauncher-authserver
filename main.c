@@ -295,7 +295,7 @@ bool isHWIDBanned(char *hwid) {
 #elif DATABASE == DB_MYSQL
 	char buf[150];
 	MYSQL_RES * result;
-	bool ret;
+	bool ret = false;
 
 	sprintf(buf, "SELECT * FROM `bannedhwids` WHERE `hwid`='%s'", hwid);
 	mysql_query(mysql, buf);
