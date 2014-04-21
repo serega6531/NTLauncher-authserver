@@ -48,6 +48,7 @@ pthread_t restartthread = 0;
 pthread_t mcthread = 0;
 int lsock = 0, serverpipe[2];
 el *head = NULL;
+bool stopping = false;
 
 void *f01(void *data);
 
@@ -71,7 +72,7 @@ pid_t popen2(int *infp, int *outfp) {
 		dup2(p_stdout[WRITE], WRITE);
 
 		execv(JAVA_PATH, LAUNCH_ARGS);
-		perror("execl");
+		perror("exec");
 		exit(1);
 	}
 
@@ -120,15 +121,14 @@ int strpos(char *str, char *substr) {
 }
 
 #if AUTO_RESTART == TRUE
-/* Проверяет, запущена ли программа с данным pid */
-bool PIDExists(pid_t pid){
+/* Проверяет, запущена ли программа с данным pid */bool PIDExists(pid_t pid) {
 	if (kill(pid, 0) == 0) {
-	    return true;
+		return true;
 	} else if (errno == ESRCH) {
-	    return false;
+		return false;
 	} else {
-	    perror("Kill process error");
-	    return false;
+		perror("Kill error");
+		return false;
 	}
 }
 #endif
@@ -155,7 +155,7 @@ bool isXML(char *string) {
 }
 
 /* Преобразует число в строку */
-void itoa(int integer, char *result){
+void itoa(int integer, char *result) {
 	sprintf(result, "%d", integer);
 }
 
@@ -228,17 +228,17 @@ void exitListener(int sig) {
 }
 
 /* Запускает minecraft сервер */
-void startMCServer(){
+void startMCServer() {
 #if AUTO_RESTART == FALSE
 	if (popen2(&serverpipe[WRITE], &serverpipe[READ]) <= 0) { // Запускаем сервер, устанавливаем ввод и вывод на ячейки массива
 #elif AUTO_RESTART == TRUE
 	if ((serverpid = popen2(&serverpipe[WRITE], &serverpipe[READ])) > 0) {
-		if(restartthread != 0){
+		if (restartthread != 0) {
 			pthread_kill(mcthread, SIGSTOP);
 			mcthread = 0;
 		}
 		if (pthread_create(&mcthread, NULL, (void *) &f01, NULL ) != 0) { // Запускаем поток, слушающий сообщения с сервера
-			puts("thread creating error");                  // или выключаем обвязку
+			puts("thread creating error");              // или выключаем обвязку
 			stop();
 		}
 		printf("Server started, pid %d\n", serverpid);
@@ -295,7 +295,7 @@ bool isHWIDBanned(char *hwid) {
 #elif DATABASE == DB_MYSQL
 	char buf[150];
 	MYSQL_RES * result;
-	bool ret;
+	bool ret = false;
 
 	sprintf(buf, "SELECT * FROM `bannedhwids` WHERE `hwid`='%s'", hwid);
 	mysql_query(mysql, buf);
@@ -408,7 +408,7 @@ bool cmpHash(char *str) {
 	char server[strlen(CLIENT_HASH) + 2], salt[2], nserver[strlen(CLIENT_HASH)];
 
 	strcpy(server, CLIENT_HASH);
-	memmove(salt, str, 2);             // Получаем соль из первых двух символов сообщения
+	memmove(salt, str, 2);    // Получаем соль из первых двух символов сообщения
 	strcut(str, 2, strlen(str) - 2);   // Оставляем в сообщении оставшееся
 	strcat(server, salt);              // Добавляем соль к хешу сервера
 	hash(server, nserver);             // Хешируем её
@@ -484,7 +484,7 @@ void processAnswer(char *result, char *message) {
 						login, mail);
 				mysql_query(mysql, buf);
 				msresult = mysql_store_result(mysql);
-				if (mysql_num_rows(msresult) > 0) {          // Если такой игрок уже есть
+				if (mysql_num_rows(msresult) > 0) { // Если такой игрок уже есть
 					strcpy(result, "<response>already exists</response>");
 					res = false;
 				}
@@ -550,6 +550,7 @@ bool processConsoleMessage(char *message) {
 #endif
 
 	if (strcmp(message, "stop\n") == 0) {     // Если сообщение - stop
+		stopping = true;
 		sendMessage("stop\n");
 		puts("Waiting for server stopping...");
 		sleep(3);
@@ -584,7 +585,7 @@ bool processConsoleMessage(char *message) {
 
 		while (!mysql_eof(msres)) {            // Проходимся по ним циклом
 			msrow = mysql_fetch_row(msres);
-			sprintf(buf, "INSERT INTO `bannedhwids` VALUES ('%s','%s')", arg,   // Баним HWID
+			sprintf(buf, "INSERT INTO `bannedhwids` VALUES ('%s','%s')", arg, // Баним HWID
 					msrow[0]);
 			mysql_query(mysql, buf);
 			printf("Banned hwid %s", msrow[0]);
@@ -596,7 +597,7 @@ bool processConsoleMessage(char *message) {
 			snprintf(buf, sizeof(buf), "<hwid>%s</hwid>\n", arg);
 			fputs(buf, hwidfile);        // Записываем его в список забаненных
 #elif DATABASE == DB_MYSQL
-		sprintf(buf, "INSERT INTO `bannedhwids` VALUES ('__BANNEDUSER__','%s')",    //Отправляем запрос на добавление HWID'а с фейковым пользователем
+		sprintf(buf, "INSERT INTO `bannedhwids` VALUES ('__BANNEDUSER__','%s')", //Отправляем запрос на добавление HWID'а с фейковым пользователем
 				arg);
 		mysql_query(mysql, buf);
 #endif
@@ -628,7 +629,7 @@ void * f00(void *data) {
 	while ((nread = read(asock, buf, BUFSIZE)) > 0) {     // Читаем сообщение
 		processAnswer(answer, buf);                       // Обрабатываем
 		write(asock, answer, strlen(answer));             // Посылаем ответ
-		shutdown(asock, 0);                               // Закрываем соединение
+		shutdown(asock, 0);                              // Закрываем соединение
 	}
 	return NULL ;
 }
@@ -639,7 +640,8 @@ void *f01(void *data) {
 	char buf[BUFSIZE];
 
 	while (1) {
-		read(serverpipe[READ], buf, BUFSIZE - 1);    // Получаем сообщения сервера
+		if(read(serverpipe[READ], buf, BUFSIZE - 1) <= 1) // Получаем сообщения сервера
+			continue;
 		printf("[SERVER]%s", buf);                   // Выводим
 		memset(buf, 0, strlen(buf));                 // Очищаем буфер
 	}
@@ -653,10 +655,10 @@ void *f02(void *data) {
 	pthread_t threadid[MAXTHREADS], nthreads = 0;
 
 	while (1) {
-		if ((asock = accept(lsock, NULL, NULL )) < 0)     // Принимаем подклчение
+		if ((asock = accept(lsock, NULL, NULL )) < 0)    // Принимаем подклчение
 			puts("accept error");
 
-		if (pthread_create(&threadid[x++], NULL, (void *) &f00, &asock) != 0)    // Передаём в поток
+		if (pthread_create(&threadid[x++], NULL, (void *) &f00, &asock) != 0) // Передаём в поток
 			puts("thread creating error");
 
 		if (nthreads++ >= MAXTHREADS)
@@ -675,7 +677,8 @@ void *f03(void *data) {
 	el *tmp;
 
 	while (1) {
-		LL_FOREACH(head, tmp)         // Цикл, уменьшающий время игроков до удаления из вайтлиста
+		LL_FOREACH(head, tmp)
+		// Цикл, уменьшающий время игроков до удаления из вайтлиста
 		{
 			tmp->pt.time--;
 			if (tmp->pt.time == 0) {
@@ -688,17 +691,21 @@ void *f03(void *data) {
 	return NULL ;
 }
 
+#if AUTO_RESTART == TRUE
+
 /* Функция потока, перезапускающего сервер при надобности */
 
 void *f04(void *data) {
-
 	while (1) {
-		if(serverpid == 0 || !PIDExists(serverpid))
-			startMCServer();
-		sleep(AUTO_RESTART_DELAY);
+		waitpid(serverpid, NULL, 0);
+		if (stopping)
+			return NULL ;
+		startMCServer();
 	}
 	return NULL ;
 }
+
+#endif
 
 /* Инициализация ВСЕГО */
 
